@@ -31,3 +31,15 @@ func (mem *MemStorage) GetValue(ID string) (any, error) {
 	}
 	return val, nil
 }
+
+// Gets all values from the Mem Storage
+func (mem *MemStorage) AllValues() ([]any, error) {
+
+		var result []any
+		mem.storage.Range(func(key, value any) bool {
+			result = append(result, value)
+			return true
+		})
+		return result, nil
+	
+}
