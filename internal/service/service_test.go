@@ -89,7 +89,7 @@ func TestMetricService_UpdateMetrics_SecondTime(t *testing.T) {
 				},
 			},
 			wantErr:   false,
-			errString: "Unknown metrics ID, create a new one",
+			errString: "Unknown metrics ID, created the new one",
 		},
 		{
 			name: "Positive test. Add a new gauge",
@@ -101,7 +101,7 @@ func TestMetricService_UpdateMetrics_SecondTime(t *testing.T) {
 				},
 			},
 			wantErr:   false,
-			errString: "Unknown metrics ID, create a new one",
+			errString: "Unknown metrics ID, created the new one",
 		},
 	}
 	// Create a new Gomock controller

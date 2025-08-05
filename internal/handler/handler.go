@@ -59,57 +59,18 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, err.Error())
 		return
 	}
-	if len(components) != 3 {
-		if len(components) > 3 {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "Too many components")
-
-			return
-		} else {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "Not enough components")
-			return
-		}
+	
+	metricsModel, parseErr := BuildMetrics(components)
+	
+	if parseErr != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, string(parseErr.Error()))
+		return
 	}
-
-	metricsModel := model.Metrics{
-		ID:    components[1],
-		MType: components[0],
-		Delta: nil,
-		Value: nil,
-	}
-	{
-		var parseErr error
-		var delta int64
-		var value float64
-		switch components[0] {
-		// Only known types of metrics are allowed
-		case model.Counter:
-			delta, parseErr = strconv.ParseInt(components[2], 10, 64)
-			if parseErr != nil {
-				break
-			}
-			metricsModel.Delta = &delta
-		case model.Gauge:
-			value, parseErr = strconv.ParseFloat(components[2], 64)
-			if parseErr != nil {
-				break
-			}
-			metricsModel.Value = &value
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "Unknown metrics type: %s", components[0])
-			return
-		}
-		if parseErr != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, string(parseErr.Error()))
-			return
-		}
-	}
+	
 	if err := h.Service.UpdateMetrics(&metricsModel); err != nil {
-		// If error is "Unknown metrics ID, create a new one" - then it's a new metrics
-		if strings.Contains(err.Error(), "Unknown metrics ID") {
+		// If error is "Unknown metrics ID, created the new one" - then it's a new metrics
+		if strings.Contains(err.Error(), "created the new one") {
 			//Everything is ok, new metrics was added
 			fmt.Fprintf(w, "A new metrics %s was added.", metricsModel.ID)
 		}
@@ -122,7 +83,14 @@ func PathToParse(path string) ([]string, error) {
 		return nil, errors.New("path is empty")
 	}
 	// TODO: check path
-	components := strings.Split(path, "/")
+	components := strings.Split(strings.Trim(path, "/"), "/")
+	if len(components) != 3 {
+		if len(components) > 3 {
+			return nil, fmt.Errorf("Too many components in path: %s", path)
+		} else {
+			return nil, fmt.Errorf("Not enough componentsin path: %s", path)
+		}
+	}
 	return components, nil
 }
 
