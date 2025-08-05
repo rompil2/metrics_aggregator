@@ -34,7 +34,6 @@ func (mem *MemStorage) GetMetrics(ID string) (any, error) {
 
 // Gets all values from the Mem Storage
 func (mem *MemStorage) AllMetrics() ([]any, error) {
-
 	var result []any
 	mem.storage.Range(func(key, value any) bool {
 		result = append(result, value)

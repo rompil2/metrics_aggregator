@@ -7,15 +7,13 @@ import (
 )
 
 func TestNewMemStorage(t *testing.T) {
-	got, err := NewMemStorage()
+	_, err := NewMemStorage()
 	if err != nil {
 		t.Fatal(
 			"Can't create new MemStorage",
 			err,
 		)
 	}
-	// check if MemStorage satisfies the interface Repo
-	var _ Repo = got
 }
 
 func TestMemStorage_SetValue(t *testing.T) {

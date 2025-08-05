@@ -18,12 +18,24 @@ type MetricService struct {
 
 // Returns all available metrics in the repository.
 func (s *MetricService) AllMetrics() ([]model.Metrics, error) {
-	panic("unimplemented")
+	if data, err := (*s.repository).AllMetrics(); err != nil {
+		return nil, err
+	} else {
+		var metrics []model.Metrics
+		for _, v := range data {
+			metrics = append(metrics, (v).(model.Metrics))
+		}
+		return metrics, nil
+	}
 }
 
 // Returns metrics with the given ID.
 func (s *MetricService) GetMetrics(ID string) (model.Metrics, error) {
-	panic("unimplemented")
+	storedData, err := (*s.repository).GetMetrics(ID)
+	if err != nil {
+		return model.Metrics{}, errors.New("Unknown metrics ID")
+	}
+	return *(storedData).(*model.Metrics), nil
 }
 
 // Updates metrics with the given ID. either it is Counter or Gauge.
@@ -36,7 +48,7 @@ func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
 		if err != nil {
 			return err
 		}
-		return errors.New("Unknown metrics ID, create a new one")
+		return errors.New("Unknown metrics ID, created the new one")
 	}
 	if storedData != nil {
 		var existedMetrics model.Metrics
@@ -56,6 +68,10 @@ func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
 			*existedMetrics.Value = *metric.Value
 		default:
 			panic("Unknown type of metric") //shouldn't happen
+		}
+		err := (*s.repository).SetMetrics(id, metric)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
