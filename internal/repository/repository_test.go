@@ -7,10 +7,15 @@ import (
 )
 
 func TestNewMemStorage(t *testing.T) {
-	got := NewMemStorage()
-	if got == nil {
-		t.Fatal("MemStorage is Nil")
+	got, err := NewMemStorage()
+	if err != nil {
+		t.Fatal(
+			"Can't create new MemStorage",
+			err,
+		)
 	}
+	// check if MemStorage satisfies the interface Repo
+	var _ Repo = got
 }
 
 func TestMemStorage_SetValue(t *testing.T) {
@@ -26,14 +31,17 @@ func TestMemStorage_SetValue(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			id := "test"
-			mm := NewMemStorage()
-			err := mm.SetValue(id, tc.value)
+			mm, err := NewMemStorage()
+			if err != nil {
+				t.Fatal("Can't create new MemStorage", err)
+			}
+			err = mm.SetMetrics(id, tc.value)
 			if tc.wanrErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-			got, err := mm.GetValue(id)
+			got, err := mm.GetMetrics(id)
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, tc.want, got)
@@ -55,12 +63,15 @@ func TestMemStorage_GetValue(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			id := "test"
-			mm := NewMemStorage()
-			err := mm.SetValue(id, tc.value)
+			mm, err := NewMemStorage()
+			if err != nil {
+				t.Fatal("Can't create new MemStorage", err)
+			}
+			err = mm.SetMetrics(id, tc.value)
 			if err != nil {
 				t.Fatal("Can't set value", err)
 			}
-			got, err := mm.GetValue(id)
+			got, err := mm.GetMetrics(id)
 			if tc.wanrErr {
 				assert.Error(t, err)
 			} else {
@@ -77,19 +88,22 @@ func TestMemStorage_GetValue(t *testing.T) {
 
 func TestMemStorage_AllValues(t *testing.T) {
 	t.Run("Get all values", func(t *testing.T) {
-		
-		mm := NewMemStorage()
+
+		mm, err := NewMemStorage()
+		if err != nil {
+			t.Fatal("Can't create new MemStorage", err)
+		}
 		id := "test"
-		err := mm.SetValue(id, int(1))
+		err = mm.SetMetrics(id, int(1))
 		if err != nil {
 			t.Fatal("Can't set value", err)
 		}
 		id = "test1"
-		err = mm.SetValue(id, int(2))
+		err = mm.SetMetrics(id, int(2))
 		if err != nil {
 			t.Fatal("Can't set value", err)
 		}
-		got, err := mm.AllValues()
+		got, err := mm.AllMetrics()
 		assert.NoError(t, err)
 		if err == nil {
 			if got != nil {

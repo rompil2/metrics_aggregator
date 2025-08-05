@@ -1,6 +1,6 @@
 module github.com/rompil2/metrics_aggregator
 
-go 1.24.5
+go 1.23.2
 
 require github.com/stretchr/testify v1.10.0
 
