@@ -27,7 +27,7 @@ func (mem *MemStorage) SetMetrics(ID string, value any) error {
 func (mem *MemStorage) GetMetrics(ID string) (any, error) {
 	val, ok := mem.storage.Load(ID)
 	if !ok {
-		return nil, fmt.Errorf("requested value for %s does not exist\n", ID)
+		return nil, fmt.Errorf("requested value for %s does not exist", ID)
 	}
 	return val, nil
 }

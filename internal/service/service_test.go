@@ -33,7 +33,7 @@ func TestMetricService_UpdateMetrics(t *testing.T) {
 				},
 			},
 			wantErr:   true,
-			errString: "Unknown metrics ID, created the new one",
+			errString: "unknown metrics ID, created the new one",
 		},
 		{
 			name: "Positive test. Add a new gauge",
@@ -45,7 +45,7 @@ func TestMetricService_UpdateMetrics(t *testing.T) {
 				},
 			},
 			wantErr:   true,
-			errString: "Unknown metrics ID, created the new one",
+			errString: "unknown metrics ID, created the new one",
 		},
 	}
 	// Create a new Gomock controller
@@ -141,7 +141,7 @@ func TestMetricService_GetMetrics(t *testing.T) {
 				},
 			},
 			wantErr:   true,
-			errString: "Unknown metrics ID",
+			errString: "unknown metrics ID",
 		},
 		{
 			name: "Negative test. No gauge",
@@ -153,7 +153,7 @@ func TestMetricService_GetMetrics(t *testing.T) {
 				},
 			},
 			wantErr:   true,
-			errString: "Unknown metrics ID",
+			errString: "unknown metrics ID",
 		},
 		{
 			name: "Positive test. Counter exists",

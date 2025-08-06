@@ -1,3 +1,4 @@
+//nolint:bodyclose
 package handler
 
 import (
@@ -146,6 +147,10 @@ func TestHandlerMux_UpdateMetrics(t *testing.T) {
 			"Negative test.  Wrong metrics type.", "/caunter/cpu/1", true, http.StatusBadRequest,
 		}, {
 			"Negative test. Wrong data format", "/counter/cpu/t", true, http.StatusBadRequest,
+		}, {
+			"Negative test. Without counter ID", "/counter/", true, http.StatusNotFound,
+		}, {
+			"Negative test. Without gauge ID", "/gauge/", true, http.StatusNotFound,
 		},
 	}
 	ctrl := gomock.NewController(t)
@@ -190,7 +195,11 @@ func TestMiddlewarePostOnly(t *testing.T) {
 
 			MiddlewarePostOnly(dummyHandler)(recorder, req)
 
-			require.Equal(t, tt.wantCode, recorder.Result().StatusCode)
+			resp := recorder.Result()
+			defer resp.Body.Close()
+
+			require.Equal(t, tt.wantCode, resp.StatusCode)
+
 			if tt.wantBody != "" {
 				assert.Contains(t, recorder.Body.String(), tt.wantBody)
 			}

@@ -43,13 +43,18 @@ func MiddlewarePostOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-
 func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 
 	//parse requests path
 	components, err := PathToParse(r.URL.Path)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		switch len(components) {
+		case 1:
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+
 		fmt.Fprint(w, err.Error())
 		return
 	}
@@ -80,9 +85,9 @@ func PathToParse(path string) ([]string, error) {
 	components := strings.Split(strings.Trim(path, "/"), "/")
 	if len(components) != 3 {
 		if len(components) > 3 {
-			return nil, fmt.Errorf("Too many components in path: %s", path)
+			return components, fmt.Errorf("too many components in path: %s", path)
 		} else {
-			return nil, fmt.Errorf("Not enough componentsin path: %s", path)
+			return components, fmt.Errorf("not enough components in path: %s", path)
 		}
 	}
 	return components, nil
@@ -96,7 +101,7 @@ func BuildMetrics(components []string) (model.Metrics, error) {
 	case model.Counter:
 		val, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
-			return model.Metrics{}, errors.New("Wrong delta format, must be int")
+			return model.Metrics{}, errors.New("wrong delta format, must be int")
 		}
 		return model.Metrics{
 			ID:    id,
@@ -107,7 +112,7 @@ func BuildMetrics(components []string) (model.Metrics, error) {
 	case model.Gauge:
 		val, err := strconv.ParseFloat(val, 64)
 		if err != nil {
-			return model.Metrics{}, errors.New("Wrong value format, must be float")
+			return model.Metrics{}, errors.New("wrong value format, must be float")
 		}
 		return model.Metrics{
 			ID:    id,
@@ -115,7 +120,7 @@ func BuildMetrics(components []string) (model.Metrics, error) {
 			Value: &val,
 		}, err
 	default:
-		return model.Metrics{}, errors.New("Unknown metrics type")
+		return model.Metrics{}, errors.New("unknown metrics type")
 	}
 
 }

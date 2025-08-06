@@ -33,7 +33,7 @@ func (s *MetricService) AllMetrics() ([]model.Metrics, error) {
 func (s *MetricService) GetMetrics(ID string) (model.Metrics, error) {
 	storedData, err := (*s.repository).GetMetrics(ID)
 	if err != nil {
-		return model.Metrics{}, errors.New("Unknown metrics ID")
+		return model.Metrics{}, errors.New("unknown metrics ID")
 	}
 	return *(storedData).(*model.Metrics), nil
 }
@@ -48,7 +48,7 @@ func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
 		if err != nil {
 			return err
 		}
-		return errors.New("Unknown metrics ID, created the new one")
+		return errors.New("unknown metrics ID, created the new one")
 	}
 	if storedData != nil {
 		var existedMetrics model.Metrics
