@@ -11,6 +11,7 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/mocks"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUpdateHandler(t *testing.T) {
@@ -168,22 +169,59 @@ func TestHandlerMux_UpdateMetrics(t *testing.T) {
 	}
 }
 
-func TestMiddlewareRemoveUpdateFromPath(t *testing.T) {
-	type args struct {
-		next http.HandlerFunc
+func TestMiddlewarePostOnly(t *testing.T) {
+	tests := []struct {
+		Name     string
+		Method   string
+		wantCode int
+		wantBody string
+	}{
+		{"Valid_POST_Request", http.MethodPost, http.StatusOK, ""},
+		{"Invalid_GET_Request", http.MethodGet, http.StatusMethodNotAllowed, "Only POST method is allowed"},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.Method, "/", nil)
+
+			dummyHandler := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {})
+
+			MiddlewarePostOnly(dummyHandler)(recorder, req)
+
+			require.Equal(t, tt.wantCode, recorder.Result().StatusCode)
+			if tt.wantBody != "" {
+				assert.Contains(t, recorder.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestMiddlewareRemoveUpdateFromPath(t *testing.T) {
 	tests := []struct {
 		name string
-		args args
-		want http.HandlerFunc
+		path string
+		want string
 	}{
-		// TODO: Add test cases.
+		{"Positive test", "/update/counter/cpu/1", "counter/cpu/1"},
+		{"Negative test. Double slash", "//update/counter/cpu/1", "//update/counter/cpu/1"},
+		//any path must start with /
+		// {"Negative test. No slash", "update/counter/cpu/1", "update/counter/cpu/1"},
+		{"Negative test. Only update", "/update/", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := MiddlewareRemoveUpdateFromPath(tt.args.next); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("MiddlewareRemoveUpdateFromPath() = %v, want %v", got, tt.want)
-			}
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+
+			dummyHandler := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, tt.want, r.URL.Path)
+			})
+
+			MiddlewareRemoveUpdateFromPath(dummyHandler)(recorder, req)
+			require.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+
 		})
 	}
 }

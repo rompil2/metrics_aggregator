@@ -34,8 +34,8 @@ func MiddlewarePostOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		//only Post methods are allowed
 		if r.Method != http.MethodPost {
-			fmt.Fprint(w, "Only POST method is allowed")
 			w.WriteHeader(http.StatusMethodNotAllowed)
+			fmt.Fprint(w, "Only POST method is allowed")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -59,15 +59,15 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, err.Error())
 		return
 	}
-	
+
 	metricsModel, parseErr := BuildMetrics(components)
-	
+
 	if parseErr != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprint(w, string(parseErr.Error()))
 		return
 	}
-	
+
 	if err := h.Service.UpdateMetrics(&metricsModel); err != nil {
 		// If error is "Unknown metrics ID, created the new one" - then it's a new metrics
 		if strings.Contains(err.Error(), "created the new one") {
