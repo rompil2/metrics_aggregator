@@ -25,7 +25,8 @@ func NewHandlerMux(service Service) *HandlerMux {
 	h := &HandlerMux{
 		Service: service,
 	}
-	h.HandleFunc("/update/", MiddlewareRemoveUpdateFromPath(MiddlewarePostOnly(h.UpdateMetrics)))
+	// h.HandleFunc("/update/", MiddlewareRemoveUpdateFromPath(MiddlewarePostOnly(h.UpdateMetrics)))
+	h.Handle("/update/", http.StripPrefix("/update/", MiddlewarePostOnly(h.UpdateMetrics)))
 	//TODO: add other handlers
 	return h
 }
@@ -42,13 +43,6 @@ func MiddlewarePostOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func MiddlewareRemoveUpdateFromPath(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		pathToParse := strings.TrimPrefix(r.URL.Path, "/update/")
-		r.URL.Path = pathToParse
-		next.ServeHTTP(w, r)
-	}
-}
 
 func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 

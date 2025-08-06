@@ -197,31 +197,3 @@ func TestMiddlewarePostOnly(t *testing.T) {
 		})
 	}
 }
-
-func TestMiddlewareRemoveUpdateFromPath(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-		want string
-	}{
-		{"Positive test", "/update/counter/cpu/1", "counter/cpu/1"},
-		{"Negative test. Double slash", "//update/counter/cpu/1", "//update/counter/cpu/1"},
-		//any path must start with /
-		// {"Negative test. No slash", "update/counter/cpu/1", "update/counter/cpu/1"},
-		{"Negative test. Only update", "/update/", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
-
-			dummyHandler := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, tt.want, r.URL.Path)
-			})
-
-			MiddlewareRemoveUpdateFromPath(dummyHandler)(recorder, req)
-			require.Equal(t, http.StatusOK, recorder.Result().StatusCode)
-
-		})
-	}
-}
