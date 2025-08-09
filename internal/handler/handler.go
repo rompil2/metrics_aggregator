@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,28 +21,41 @@ type Service interface {
 type HandlerMux struct {
 	http.ServeMux
 	Service Service
+	tmpl    *template.Template
 }
 
 func NewHandlerMux(service Service) *HandlerMux {
+	tmpl := template.Must(template.ParseFiles("templates/index.html"))
+
 	h := &HandlerMux{
 		Service: service,
+		tmpl:    tmpl,
 	}
-	// h.HandleFunc("/update/", MiddlewareRemoveUpdateFromPath(MiddlewarePostOnly(h.UpdateMetrics)))
 	h.Handle("/update/", http.StripPrefix("/update/", MiddlewarePostOnly(h.UpdateMetrics)))
-	//TODO: add other handlers
+	h.Handle("/", http.HandlerFunc(h.HomePage))
+	h.Handle("/value/", http.StripPrefix("/value/", MiddlewareGetOnly(h.GetMetrics)))
 	return h
 }
 
-func MiddlewarePostOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		//only Post methods are allowed
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprint(w, "Only POST method is allowed")
-			return
-		}
-		next.ServeHTTP(w, r)
+func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
+	metrics, err := h.Service.AllMetrics()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
+	h.tmpl.Execute(w, metrics)
+}
+
+func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	id := parts[len(parts)-1] // this how get the last element of the slited string, its ID
+	metrics, err := h.Service.GetMetrics(id)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
 }
 
 func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
@@ -123,4 +138,28 @@ func BuildMetrics(components []string) (model.Metrics, error) {
 		return model.Metrics{}, errors.New("unknown metrics type")
 	}
 
+}
+
+func MiddlewarePostOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		//only Post methods are allowed
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			fmt.Fprint(w, "Only POST method is allowed")
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
+}
+
+func MiddlewareGetOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		//only Get methods are allowed
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			fmt.Fprint(w, "Only Get method is allowed")
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
 }

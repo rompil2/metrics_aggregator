@@ -23,7 +23,9 @@ func (s *MetricService) AllMetrics() ([]model.Metrics, error) {
 	} else {
 		var metrics []model.Metrics
 		for _, v := range data {
-			metrics = append(metrics, (v).(model.Metrics))
+			if value, ok := v.(*model.Metrics); ok {
+				metrics = append(metrics, *value)
+			}
 		}
 		return metrics, nil
 	}
