@@ -16,8 +16,8 @@ func main() {
 	defer cancel()
 
 	// Настройка агента
-	collector := agent.NewCollector(1 * time.Second)
-	client := agent.NewHTTPClient(1*time.Second, "localhost", 8080)
+	collector := agent.NewCollector(2 * time.Second)
+	client := agent.NewHTTPClient(10*time.Second, "localhost", 8080)
 	agent := agent.New(collector, client)
 
 	// Запуск агента
