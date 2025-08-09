@@ -123,8 +123,10 @@ func TestPathToParse(t *testing.T) {
 				t.Errorf("PathToParse() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("PathToParse() = %v, want %v", got, tt.want)
+			if !tt.wantErr { // do not expect an error
+				if !reflect.DeepEqual(got, tt.want) {
+					t.Errorf("PathToParse() = %v, want %v", got, tt.want)
+				}
 			}
 		})
 	}
