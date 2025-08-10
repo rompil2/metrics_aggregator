@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -70,8 +69,13 @@ func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(metrics)
+	w.Header().Set("Content-Type", "plain/text")
+	switch metrics.MType {
+	case model.Counter:
+		fmt.Fprintf(w, "%d", *metrics.Delta)
+	case model.Gauge:
+		fmt.Fprintf(w, "%f", *metrics.Value)
+	}
 }
 
 func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
