@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
@@ -19,20 +21,26 @@ type Service interface {
 }
 
 type HandlerMux struct {
-	http.ServeMux
+	chi.Router
 	Service Service
 	tmpl    *template.Template
 }
 
-func NewHandlerMux(service Service) *HandlerMux {
+func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 
 	h := &HandlerMux{
 		Service: service,
-		tmpl:    template.Must(template.ParseFiles("templates/index.html")),
+		tmpl:    tmpl,
 	}
-	h.Handle("/update/", http.StripPrefix("/update", MiddlewarePostOnly(h.UpdateMetrics)))
-	h.Handle("/value/", http.StripPrefix("/value", MiddlewareGetOnly(h.GetMetrics)))
-	h.Handle("/", http.HandlerFunc(h.HomePage))
+	h.Router = chi.NewRouter()
+	h.Use(middleware.RequestID)
+	h.Use(middleware.RealIP)
+	h.Use(middleware.Logger)
+	h.Use(middleware.Recoverer)
+
+	h.Get("/", h.HomePage)
+	h.Post("/update/{mtype}/{id}/{value}", h.UpdateMetrics)
+	h.Get("/value/{mtype}/{id}", h.GetMetrics)
 
 	return h
 }
@@ -47,19 +55,16 @@ func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) != 3 {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	switch parts[1] {
+
+	mtype := chi.URLParam(r, "mtype")
+	switch mtype {
 	case model.Counter, model.Gauge:
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	id := parts[len(parts)-1] // this how get the last element of the slited string, its ID
+	id := chi.URLParam(r, "id")
 	metrics, err := h.Service.GetMetrics(id)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -71,21 +76,11 @@ func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
 
 func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 
-	//parse requests path
-	components, err := PathToParse(r.URL.Path)
-	if err != nil {
-		switch len(components) {
-		case 1:
-			w.WriteHeader(http.StatusNotFound)
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-		}
+	ID := chi.URLParam(r, "id")
+	MType := chi.URLParam(r, "mtype")
+	ValDelta := chi.URLParam(r, "value")
 
-		fmt.Fprint(w, err.Error())
-		return
-	}
-
-	metricsModel, parseErr := BuildMetrics(components)
+	metricsModel, parseErr := BuildMetrics(MType, ID, ValDelta)
 
 	if parseErr != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -103,26 +98,8 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func PathToParse(path string) ([]string, error) {
-	if path == "" {
-		return nil, errors.New("path is empty")
-	}
-	// TODO: check path
-	components := strings.Split(strings.Trim(path, "/"), "/")
-	if len(components) != 3 {
-		if len(components) > 3 {
-			return components, fmt.Errorf("too many components in path: %s", path)
-		} else {
-			return components, fmt.Errorf("not enough components in path: %s", path)
-		}
-	}
-	return components, nil
-}
+func BuildMetrics(mType string, id string, val string) (model.Metrics, error) {
 
-func BuildMetrics(components []string) (model.Metrics, error) {
-	mType := components[0]
-	id := components[1]
-	val := components[2]
 	switch mType {
 	case model.Counter:
 		val, err := strconv.ParseInt(val, 10, 64)
@@ -149,28 +126,4 @@ func BuildMetrics(components []string) (model.Metrics, error) {
 		return model.Metrics{}, errors.New("unknown metrics type")
 	}
 
-}
-
-func MiddlewarePostOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		//only Post methods are allowed
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprint(w, "Only POST method is allowed")
-			return
-		}
-		next.ServeHTTP(w, r)
-	}
-}
-
-func MiddlewareGetOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		//only Get methods are allowed
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprint(w, "Only Get method is allowed")
-			return
-		}
-		next.ServeHTTP(w, r)
-	}
 }
