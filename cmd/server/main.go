@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -23,7 +24,7 @@ func main() {
 	}
 	srvc := service.NewMetricService(repository)
 
-	handler := handler.NewHandlerMux(&srvc)
+	handler := handler.NewHandlerMux(&srvc, template.Must(template.ParseFiles("templates/index.html")))
 
 	server := &http.Server{
 		Addr:    cfg.String(),
