@@ -213,17 +213,18 @@ func TestMetricService_AllMetrics(t *testing.T) {
 		{
 			name: "Positive test. There some metrics",
 			args: []any{
-				model.Metrics{
+				&model.Metrics{
 					ID:    "testCounter",
 					MType: model.Counter,
 					Delta: new(int64),
 				},
-				model.Metrics{
+				&model.Metrics{
 					ID:    "testGauge",
 					MType: model.Gauge,
 					Value: new(float64),
 				},
 			},
+			wantErr: false,
 		},
 		{
 			name:    "Negative test. No metrics",
@@ -251,7 +252,9 @@ func TestMetricService_AllMetrics(t *testing.T) {
 				assert.NoError(t, err)
 				var want []model.Metrics
 				for _, v := range tt.args {
-					want = append(want, v.(model.Metrics))
+					if value, ok := v.(*model.Metrics); ok {
+						want = append(want, *value)
+					}
 				}
 				assert.EqualValues(t, want, metrics)
 

@@ -25,15 +25,15 @@ type HandlerMux struct {
 }
 
 func NewHandlerMux(service Service) *HandlerMux {
-	tmpl := template.Must(template.ParseFiles("templates/index.html"))
 
 	h := &HandlerMux{
 		Service: service,
-		tmpl:    tmpl,
+		tmpl:    template.Must(template.ParseFiles("templates/index.html")),
 	}
-	h.Handle("/update/", http.StripPrefix("/update/", MiddlewarePostOnly(h.UpdateMetrics)))
+	h.Handle("/update/", http.StripPrefix("/update", MiddlewarePostOnly(h.UpdateMetrics)))
+	h.Handle("/value/", http.StripPrefix("/value", MiddlewareGetOnly(h.GetMetrics)))
 	h.Handle("/", http.HandlerFunc(h.HomePage))
-	h.Handle("/value/", http.StripPrefix("/value/", MiddlewareGetOnly(h.GetMetrics)))
+
 	return h
 }
 
@@ -48,6 +48,17 @@ func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
 
 func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) != 3 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	switch parts[1] {
+	case model.Counter, model.Gauge:
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	id := parts[len(parts)-1] // this how get the last element of the slited string, its ID
 	metrics, err := h.Service.GetMetrics(id)
 	if err != nil {

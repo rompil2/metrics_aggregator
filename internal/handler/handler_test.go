@@ -15,10 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpdateHandler(t *testing.T) {
-
-}
-
 func TestBuildMetrics(t *testing.T) {
 	type args struct {
 		components []string
@@ -91,22 +87,22 @@ func TestPathToParse(t *testing.T) {
 	}{
 		{
 			"Positive Test",
-			args{"counter/cpu/1"},
+			args{"/counter/cpu/1"},
 			[]string{"counter", "cpu", "1"},
 			false,
 		}, {
 			"Positive Test, slash at the end",
-			args{"counter/cpu/1/"},
+			args{"/counter/cpu/1/"},
 			[]string{"counter", "cpu", "1"},
 			false,
 		}, {
 			"Negative Test, not enough params",
-			args{"counter/cpu/"},
+			args{"/counter/cpu/"},
 			nil,
 			true,
 		}, {
 			"Negative Test, to many params",
-			args{"counter/cpu/3/test"},
+			args{"/counter/cpu/3/test"},
 			nil,
 			true,
 		}, {
@@ -132,7 +128,7 @@ func TestPathToParse(t *testing.T) {
 	}
 }
 
-func TestHandlerMux_UpdateMetrics(t *testing.T) {
+func TestHandlerMux_UpdatePost(t *testing.T) {
 
 	tests := []struct {
 		name    string
@@ -160,7 +156,8 @@ func TestHandlerMux_UpdateMetrics(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService)
+			h := HandlerMux{}
+			h.Service = mockService
 			if !tt.wantErr {
 				mockService.EXPECT().UpdateMetrics(gomock.Any()).Return(fmt.Errorf("Unknown metrics ID, created the new one")).Times(1)
 			}
@@ -204,6 +201,87 @@ func TestMiddlewarePostOnly(t *testing.T) {
 
 			if tt.wantBody != "" {
 				assert.Contains(t, recorder.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestMiddlewareGetOnly(t *testing.T) {
+	tests := []struct {
+		Name     string
+		Method   string
+		wantCode int
+		wantBody string
+	}{
+		{"Valid_Get_Request", http.MethodGet, http.StatusOK, ""},
+		{"Invalid_POST_Request", http.MethodPost, http.StatusMethodNotAllowed, "Only Get method is allowed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.Method, "/", nil)
+
+			dummyHandler := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {})
+
+			MiddlewareGetOnly(dummyHandler)(recorder, req)
+
+			resp := recorder.Result()
+			defer resp.Body.Close()
+
+			require.Equal(t, tt.wantCode, resp.StatusCode)
+
+			if tt.wantBody != "" {
+				assert.Contains(t, recorder.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestHandlerMux_ValueGet(t *testing.T) {
+
+	testMetrics := model.Metrics{
+		ID:    "cpu",
+		Delta: new(int64),
+	}
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+		errCode int
+	}{
+		// TODO: Add test cases.
+		{
+			"Positive test.", "/counter/cpu", false, http.StatusOK,
+		}, {
+			"Negative test. Without counter ID.", "/counter", true, http.StatusBadRequest,
+		}, {
+			"Negative test. Unknow ID", "/counter/memory", true, http.StatusNotFound,
+		}, {
+			"Negative test. Empty path", "/", true, http.StatusBadRequest,
+		},
+	}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockService := mocks.NewMockService(ctrl)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := HandlerMux{}
+			h.Service = mockService
+			if tt.wantErr {
+				mockService.EXPECT().GetMetrics(gomock.Any()).Return(model.Metrics{}, fmt.Errorf("unknown metrics ID")).MinTimes(0)
+			} else {
+				mockService.EXPECT().GetMetrics(gomock.Any()).Return(testMetrics, nil).Times(1)
+			}
+			r := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			h.GetMetrics(w, r)
+			if tt.wantErr {
+				assert.Equal(t, tt.errCode, w.Code)
+			} else {
+				assert.Equal(t, http.StatusOK, w.Code)
 			}
 		})
 	}
