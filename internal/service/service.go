@@ -62,7 +62,7 @@ func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
 		switch metric.MType {
 		case model.Counter:
 			if existedMetrics.Delta != nil {
-				*existedMetrics.Delta += *metric.Delta
+				*existedMetrics.Delta += *metric.Delta // TODO suspicios place
 			} else {
 				existedMetrics.Delta = metric.Delta
 			}
@@ -71,7 +71,7 @@ func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
 		default:
 			panic("Unknown type of metric") //shouldn't happen
 		}
-		err := (*s.repository).SetMetrics(id, metric)
+		err := (*s.repository).SetMetrics(id, &existedMetrics)
 		if err != nil {
 			return err
 		}

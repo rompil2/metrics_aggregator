@@ -111,7 +111,13 @@ func TestMetricService_UpdateMetrics_SecondTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRepository := mocks.NewMockRepo(ctrl)
-			mockRepository.EXPECT().SetMetrics(tt.args.metric.ID, tt.args.metric).Return(nil).Times(1)
+			updatedMetrics := *tt.args.metric
+			if tt.args.metric.MType == model.Counter {
+				*(tt.args.metric.Delta) = 1
+				updatedMetrics.Delta = new(int64)
+				*updatedMetrics.Delta = 2
+			}
+			mockRepository.EXPECT().SetMetrics(tt.args.metric.ID, &updatedMetrics).Return(nil).Times(1)
 			mockRepository.EXPECT().GetMetrics(tt.args.metric.ID).Return(tt.args.metric, nil).Times(1)
 			s := NewMetricService(mockRepository)
 			err := s.UpdateMetrics(tt.args.metric)

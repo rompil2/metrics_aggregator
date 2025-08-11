@@ -74,7 +74,7 @@ func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	case model.Counter:
 		fmt.Fprintf(w, "%d", *metrics.Delta)
 	case model.Gauge:
-		fmt.Fprintf(w, "%f", *metrics.Value)
+		fmt.Fprint(w, strconv.FormatFloat(*metrics.Value, 'f', -1, 64))
 	}
 }
 
