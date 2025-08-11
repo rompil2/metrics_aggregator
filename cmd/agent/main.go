@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -18,13 +19,23 @@ const (
 )
 
 func main() {
+
+	socket := new(config.NetAddress)
+	socket.Host = "localhost"
+	socket.Port = 8080 // the default port for the server
+
+	flag.Var(socket, "a", "-a=<host>:<port>")
+
+	pollInterval := flag.Int64("p", 2, "polling Interval in sec")
+	reportInterval := flag.Int("r", 10, "report Interval in sec")
+	flag.Parse()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Настройка агента
-	cfg := config.LoadAgentConfig()
-	collector := agent.NewCollector(cfg.PollInterval)
-	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.ServerHost, cfg.ServerPort)
+	collector := agent.NewCollector(time.Duration(*pollInterval) * time.Second)
+	client := agent.NewHTTPClient(time.Duration(*reportInterval)*time.Second, socket.Host, uint(socket.Port))
 	agent := agent.New(collector, client)
 
 	// Запуск агента

@@ -1,92 +1,37 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
-	"time"
-
-	"golang.org/x/exp/constraints"
 )
 
-type SocketConfig struct {
-	ServerHost string
-	ServerPort uint
+type NetAddress struct {
+	Host string
+	Port uint16
 }
 
-func LoadServerConfig() SocketConfig {
-	return SocketConfig{
-		ServerHost: getEnv("SERVER_HOST", "localhost"),
-		ServerPort: getEnvUint("SERVER_PORT", 8080),
+func (a *NetAddress) String() string {
+	return fmt.Sprintf("%s:%d", a.Host, a.Port)
+}
+
+func (a *NetAddress) Set(flagVal string) error {
+	paramsArr := strings.Split(flagVal, ":")
+	if len(paramsArr) != 2 {
+		return errors.New("contains to many arguments")
 	}
-}
-
-type AgentConfig struct {
-	SocketConfig
-	PollInterval   time.Duration
-	ReportInterval time.Duration
-}
-
-func LoadAgentConfig() AgentConfig {
-	ac := AgentConfig{
-		PollInterval:   getEnvDuration("POLL_INTERVAL", 2*time.Second),
-		ReportInterval: getEnvDuration("REPORT_INTERVAL", 10*time.Second),
+	if paramsArr[1] == "" {
+		return errors.New("port should be set")
 	}
-	ac.SocketConfig = LoadServerConfig()
-	return ac
-}
-
-func getEnvGeneral[T constraints.Integer | ~string](envVarName string) (T, error) {
-	var noResult T
-
-	envVarStr, exists := os.LookupEnv(envVarName)
-	if !exists {
-		return noResult, fmt.Errorf("%s does not exist", envVarName)
-	}
-	switch any(noResult).(type) {
-
-	case string:
-		return any(envVarStr).(T), nil
-
-	case time.Duration:
-		// I suppose th eduration is set in seconds with a fraction part
-		d, err := time.ParseDuration(envVarStr)
-		if err != nil {
-			return noResult, fmt.Errorf("cannot convert %s to Duration type", envVarStr)
-		}
-		return any(d).(T), nil
-	case int:
-		v, err := strconv.Atoi(envVarStr)
-		if err != nil {
-			return noResult, fmt.Errorf("cannot convert %s to number", envVarStr)
-		}
-		return any(v).(T), nil
-	case uint:
-		v, err := strconv.Atoi(envVarStr)
-		if err != nil {
-			return noResult, fmt.Errorf("cannot convert %s to number", envVarStr)
-		}
-		return any(uint(v)).(T), nil
-	default:
-		panic("the type %T is not supported yet")
-	}
-}
-
-func getEnvWithDefaults[T constraints.Integer | string](envVarName string, defaultValue T) T {
-	value, err := getEnvGeneral[T](envVarName)
+	port, err := strconv.Atoi(paramsArr[1])
 	if err != nil {
-		return defaultValue
+		return errors.New("port should be a valid decimal number")
 	}
-	return value
-}
-
-var getEnvDuration = getEnvWithDefaults[time.Duration]
-var getEnv = getEnvWithDefaults[string]
-var getEnvUint = getEnvWithDefaults[uint]
-
-func (s *SocketConfig) String() string {
-	port64 := uint64(s.ServerPort)
-	portAsString := strconv.FormatUint(port64, 10)
-	return strings.Join([]string{s.ServerHost, portAsString}, ":") // like localhost:port
+	if port > 65535 { // The maximum possible port numberfor IPv4
+		return errors.New("port should be not grater than 65535")
+	}
+	a.Host = paramsArr[0] // it migth be an empty string
+	a.Port = uint16(port)
+	return nil
 }

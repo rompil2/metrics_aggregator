@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"html/template"
 	"log"
 	"net/http"
@@ -17,7 +18,12 @@ import (
 )
 
 func main() {
-	cfg := config.LoadServerConfig()
+	socket := new(config.NetAddress)
+	socket.Port = 8080 // the default port for the server
+
+	flag.Var(socket, "a", "-a=<host>:<port>")
+	flag.Parse()
+
 	repository, err := repository.NewMemStorage()
 	if err != nil {
 		log.Fatal(err)
@@ -27,7 +33,7 @@ func main() {
 	handler := handler.NewHandlerMux(&srvc, template.Must(template.ParseFiles("templates/index.html")))
 
 	server := &http.Server{
-		Addr:    cfg.String(),
+		Addr:    socket.String(),
 		Handler: handler,
 	}
 
