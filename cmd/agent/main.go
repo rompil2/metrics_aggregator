@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	SIGTERM_CH_SIZE  = 1
-	WAIT_BEFORE_QUIT = 1 // in seconds
+	sigterChSize   = 1
+	waitBeforeQuit = 1 // in seconds
 )
 
 func main() {
@@ -35,11 +35,11 @@ func main() {
 	}()
 
 	// Ожидание сигнала завершения
-	stop := make(chan os.Signal, SIGTERM_CH_SIZE)
+	stop := make(chan os.Signal, sigterChSize)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
 	log.Println("Shutting down...")
 	cancel()
-	time.Sleep(WAIT_BEFORE_QUIT * time.Second) // Даем время на завершение
+	time.Sleep(waitBeforeQuit * time.Second) // Даем время на завершение
 }

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	METRICS_CH_SIZE = 10
+	metricsChSize = 10
 )
 
 type Runner interface {
@@ -35,7 +35,7 @@ func New(collector MetricsCollector, client MetricsSender) *Agent {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	metricsCh := make(chan map[string]any, METRICS_CH_SIZE)
+	metricsCh := make(chan map[string]any, metricsChSize)
 	defer close(metricsCh)
 	var wg sync.WaitGroup
 	wg.Add(2)

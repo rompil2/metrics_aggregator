@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	ERR_CH_SIZE             = 1
-	LEN_OF_EMPTY_COLLECTION = 0
+	errChSize            = 1
+	lenOfEmptyCollection = 0
 )
 
 type Metrics = map[string]any
@@ -38,7 +38,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	ticker := time.NewTicker(h.reportInterval)
 	defer ticker.Stop()
 
-	errCh := make(chan error, ERR_CH_SIZE) //Buffer is to avoid stacking
+	errCh := make(chan error, errChSize) //Buffer is to avoid stacking
 	defer close(errCh)
 
 	var wg sync.WaitGroup
@@ -143,7 +143,7 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 
 	wg.Wait()
 
-	if len(errs) > LEN_OF_EMPTY_COLLECTION {
+	if len(errs) > lenOfEmptyCollection {
 		return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errs[0])
 	}
 	return nil
