@@ -74,8 +74,6 @@ func (r *Collector) Poll() map[string]any {
 	// Extra metrics
 	atomic.AddInt64(&r.pollCount, 1)
 	metrics["PollCount"] = atomic.LoadInt64(&r.pollCount)
-	// r.pollCount++
-	// metrics["PollCount"] = r.pollCount
 
 	return metrics
 }

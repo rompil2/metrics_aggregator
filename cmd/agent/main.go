@@ -12,6 +12,11 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/config"
 )
 
+const (
+	SIGTERM_CH_SIZE  = 1
+	WAIT_BEFORE_QUIT = 1 // in seconds
+)
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -30,11 +35,11 @@ func main() {
 	}()
 
 	// Ожидание сигнала завершения
-	stop := make(chan os.Signal, 1)
+	stop := make(chan os.Signal, SIGTERM_CH_SIZE)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
 	log.Println("Shutting down...")
 	cancel()
-	time.Sleep(1 * time.Second) // Даем время на завершение
+	time.Sleep(WAIT_BEFORE_QUIT * time.Second) // Даем время на завершение
 }

@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+const (
+	ERR_CH_SIZE             = 1
+	LEN_OF_EMPTY_COLLECTION = 0
+)
+
 type Metrics = map[string]any
 
 type HTTPClient struct {
@@ -33,7 +38,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	ticker := time.NewTicker(h.reportInterval)
 	defer ticker.Stop()
 
-	errCh := make(chan error, 1) //Buffer is to avoid stacking
+	errCh := make(chan error, ERR_CH_SIZE) //Buffer is to avoid stacking
 	defer close(errCh)
 
 	var wg sync.WaitGroup
@@ -74,7 +79,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 				if err := h.SendMetrics(ctx, metrics); err != nil {
 					select {
 					case errCh <- err:
-					default: // adoid blocking if errCh is full
+					default: // avoid blocking if errCh is full
 					}
 				}
 			}()
@@ -138,7 +143,7 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 
 	wg.Wait()
 
-	if len(errs) > 0 {
+	if len(errs) > LEN_OF_EMPTY_COLLECTION {
 		return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errs[0])
 	}
 	return nil

@@ -6,16 +6,28 @@ import (
 	"sync"
 )
 
+const (
+	METRICS_CH_SIZE = 10
+)
+
 type Runner interface {
 	Run(ctx context.Context, ch chan map[string]any)
 }
 
-type Agent struct {
-	collector Runner
-	client    Runner
+type MetricsCollector interface {
+	Runner
 }
 
-func New(collector Runner, client Runner) *Agent {
+type MetricsSender interface {
+	Runner
+}
+
+type Agent struct {
+	collector MetricsCollector
+	client    MetricsSender
+}
+
+func New(collector MetricsCollector, client MetricsSender) *Agent {
 	return &Agent{
 		collector: collector,
 		client:    client,
@@ -23,7 +35,7 @@ func New(collector Runner, client Runner) *Agent {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	metricsCh := make(chan map[string]any, 10)
+	metricsCh := make(chan map[string]any, METRICS_CH_SIZE)
 	defer close(metricsCh)
 	var wg sync.WaitGroup
 	wg.Add(2)
