@@ -9,13 +9,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rompil2/metrics_aggregator/internal/config"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository"
 	"github.com/rompil2/metrics_aggregator/internal/service"
 )
 
 func main() {
-
+	cfg := config.LoadServerConfig()
 	repository, err := repository.NewMemStorage()
 	if err != nil {
 		log.Fatal(err)
@@ -25,7 +26,7 @@ func main() {
 	handler := handler.NewHandlerMux(&srvc)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.String(),
 		Handler: handler,
 	}
 

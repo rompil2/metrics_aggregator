@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rompil2/metrics_aggregator/internal/agent"
+	"github.com/rompil2/metrics_aggregator/internal/config"
 )
 
 func main() {
@@ -16,8 +17,9 @@ func main() {
 	defer cancel()
 
 	// Настройка агента
-	collector := agent.NewCollector(2 * time.Second)
-	client := agent.NewHTTPClient(10*time.Second, "localhost", 8080)
+	cfg := config.LoadAgentConfig()
+	collector := agent.NewCollector(cfg.PollInterval)
+	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.ServerHost, cfg.ServerPort)
 	agent := agent.New(collector, client)
 
 	// Запуск агента
