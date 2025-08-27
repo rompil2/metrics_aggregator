@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"html/template"
 	"log"
 	"net/http"
@@ -18,11 +17,7 @@ import (
 )
 
 func main() {
-	socket := new(config.NetAddress)
-	socket.Port = 8080 // the default port for the server
-
-	flag.Var(socket, "a", "-a=<host>:<port>")
-	flag.Parse()
+	socket := config.LoadServerConfig()
 
 	repository, err := repository.NewMemStorage()
 	if err != nil {
@@ -40,7 +35,7 @@ func main() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		log.Println("The server is starting...")
+		log.Printf("The server is starting at %s\n", server.Addr)
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
