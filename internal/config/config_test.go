@@ -56,6 +56,7 @@ func TestLoadAgentConfig(t *testing.T) {
 	tests := []struct {
 		name           string
 		envVars        map[string]string
+		flags          []string
 		expectedConfig AgentConfig
 	}{
 		{
@@ -72,10 +73,24 @@ func TestLoadAgentConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "custom values",
+			name:    "flags values",
 			envVars: map[string]string{
-				"POLL_INTERVAL":   "5s",
-				"REPORT_INTERVAL": "15s",
+				// Пусто - используем значения по умолчанию
+			},
+			flags: []string{"-a", "127.0.0.1:9090", "-p", "4", "-r", "6"},
+			expectedConfig: AgentConfig{
+				PollInterval:   4 * time.Second,
+				ReportInterval: 6 * time.Second,
+				SocketConfig: SocketConfig{
+					Host: "127.0.0.1",
+					Port: 9090},
+			},
+		},
+		{
+			name: "custom env values",
+			envVars: map[string]string{
+				"POLL_INTERVAL":   "5",
+				"REPORT_INTERVAL": "15",
 				"SERVER_HOST":     "example.com",
 				"SERVER_PORT":     "9090",
 			},
@@ -98,7 +113,7 @@ func TestLoadAgentConfig(t *testing.T) {
 			}
 
 			// Получаем конфиг
-			config := LoadAgentConfig()
+			config := LoadAgentConfig(tt.flags)
 
 			// Проверяем значения
 			assert.Equal(t, tt.expectedConfig, config)

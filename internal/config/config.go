@@ -4,12 +4,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"golang.org/x/exp/constraints"
+)
+
+const (
+	default_host           = "localhost"
+	default_port           = 8080
+	default_pollInterval   = 2
+	default_reportInterval = 10
 )
 
 type SocketConfig struct {
@@ -20,33 +27,30 @@ type SocketConfig struct {
 func (s *SocketConfig) String() string {
 	port64 := uint64(s.Port)
 	portAsString := strconv.FormatUint(port64, 10)
-	return strings.Join([]string{s.Host, portAsString}, ":") // like localhost:port
+	return net.JoinHostPort(s.Host, portAsString)
 }
 
 func (s *SocketConfig) Set(flagVal string) error {
-	paramsArr := strings.Split(flagVal, ":")
-	if len(paramsArr) != 2 {
-		return errors.New("contains to many arguments")
+	host, portStr, err := net.SplitHostPort(flagVal)
+	if err != nil {
+		return fmt.Errorf("invalid address format: %w", err)
 	}
-	if paramsArr[1] == "" {
-		return errors.New("port should be set")
-	}
-	port, err := strconv.Atoi(paramsArr[1])
+	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return errors.New("port should be a valid decimal number")
 	}
-	if port > 65535 { // The maximum possible port numberfor IPv4
+	if port > 65535 { // The maximum possible port number for IPv4
 		return errors.New("port should be not grater than 65535")
 	}
-	s.Host = paramsArr[0] // it migth be an empty string
+	s.Host = host // it migth be an empty string
 	s.Port = uint(port)
 	return nil
 }
 
 func LoadServerConfig() SocketConfig {
 	socket := new(SocketConfig)
-	socket.Host = "localhost"
-	socket.Port = 8080
+	socket.Host = default_host
+	socket.Port = default_port
 	flag.Var(socket, "a", "-a=<host>:<port>")
 	flag.Parse()
 
@@ -65,12 +69,30 @@ type AgentConfig struct {
 	ReportInterval time.Duration
 }
 
-func LoadAgentConfig() AgentConfig {
-	ac := AgentConfig{
-		PollInterval:   getEnvDuration("POLL_INTERVAL", 2*time.Second),
-		ReportInterval: getEnvDuration("REPORT_INTERVAL", 10*time.Second),
+func LoadAgentConfig(args []string) AgentConfig {
+	ac := AgentConfig{}
+	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
+	ac.Host = default_host
+	ac.Port = default_port
+	flagSet.Var(&ac.SocketConfig, "a", "-a=<host>:<port>")
+	pollInterval := flagSet.Uint("p", default_pollInterval, "polling Interval in sec")
+	reportInterval := flagSet.Uint("r", default_reportInterval, "report Interval in sec")
+	flagSet.Parse(args)
+
+	if val, err := getEnvUint("POLL_INTERVAL"); err == nil {
+		*pollInterval = val
 	}
-	ac.SocketConfig = LoadServerConfig()
+	if val, err := getEnvUint("REPORT_INTERVAL"); err == nil {
+		*reportInterval = val
+	}
+	if val, err := getEnv("SERVER_HOST"); err == nil {
+		ac.Host = val
+	}
+	if val, err := getEnvUint("SERVER_PORT"); err == nil {
+		ac.Port = val
+	}
+	ac.PollInterval = time.Duration(*pollInterval) * time.Second
+	ac.ReportInterval = time.Duration(*reportInterval) * time.Second
 	return ac
 }
 
