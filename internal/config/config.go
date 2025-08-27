@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	default_host           = "localhost"
-	default_port           = 8080
-	default_pollInterval   = 2
-	default_reportInterval = 10
+	defaultHost           = "localhost"
+	defaultPort           = 8080
+	defaultPollInterval   = 2
+	defaultReportInterval = 10
 )
 
 type SocketConfig struct {
@@ -49,8 +49,8 @@ func (s *SocketConfig) Set(flagVal string) error {
 
 func LoadServerConfig() SocketConfig {
 	socket := new(SocketConfig)
-	socket.Host = default_host
-	socket.Port = default_port
+	socket.Host = defaultHost
+	socket.Port = defaultPort
 	flag.Var(socket, "a", "-a=<host>:<port>")
 	flag.Parse()
 
@@ -72,11 +72,11 @@ type AgentConfig struct {
 func LoadAgentConfig(args []string) AgentConfig {
 	ac := AgentConfig{}
 	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
-	ac.Host = default_host
-	ac.Port = default_port
+	ac.Host = defaultHost
+	ac.Port = defaultPort
 	flagSet.Var(&ac.SocketConfig, "a", "-a=<host>:<port>")
-	pollInterval := flagSet.Uint("p", default_pollInterval, "polling Interval in sec")
-	reportInterval := flagSet.Uint("r", default_reportInterval, "report Interval in sec")
+	pollInterval := flagSet.Uint("p", defaultPollInterval, "polling Interval in sec")
+	reportInterval := flagSet.Uint("r", defaultReportInterval, "report Interval in sec")
 	flagSet.Parse(args)
 
 	if val, err := getEnvUint("POLL_INTERVAL"); err == nil {
