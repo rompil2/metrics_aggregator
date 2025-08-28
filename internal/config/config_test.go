@@ -91,8 +91,7 @@ func TestLoadAgentConfig(t *testing.T) {
 			envVars: map[string]string{
 				"POLL_INTERVAL":   "5",
 				"REPORT_INTERVAL": "15",
-				"SERVER_HOST":     "example.com",
-				"SERVER_PORT":     "9090",
+				"ADDRESS":         "example.com:9090",
 			},
 			expectedConfig: AgentConfig{
 				PollInterval:   5 * time.Second,

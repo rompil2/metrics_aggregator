@@ -54,12 +54,10 @@ func LoadServerConfig() SocketConfig {
 	flag.Var(socket, "a", "-a=<host>:<port>")
 	flag.Parse()
 
-	if val, err := getEnv("SERVER_HOST"); err == nil {
-		socket.Host = val
+	if val, err := getEnv("ADDRESS"); err == nil {
+		socket.Set(val)
 	}
-	if val, err := getEnvUint("SERVER_PORT"); err == nil {
-		socket.Port = val
-	}
+
 	return *socket
 }
 
@@ -85,12 +83,10 @@ func LoadAgentConfig(args []string) AgentConfig {
 	if val, err := getEnvUint("REPORT_INTERVAL"); err == nil {
 		*reportInterval = val
 	}
-	if val, err := getEnv("SERVER_HOST"); err == nil {
-		ac.Host = val
+	if val, err := getEnv("ADDRESS"); err == nil {
+		ac.Set(val)
 	}
-	if val, err := getEnvUint("SERVER_PORT"); err == nil {
-		ac.Port = val
-	}
+
 	ac.PollInterval = time.Duration(*pollInterval) * time.Second
 	ac.ReportInterval = time.Duration(*reportInterval) * time.Second
 	return ac
