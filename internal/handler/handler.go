@@ -34,7 +34,8 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Router = chi.NewRouter()
 	h.Use(middleware.RequestID)
 	h.Use(middleware.RealIP)
-	h.Use(middleware.Logger)
+	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
+	h.Use(NaiveLoggerMiddleware)
 	h.Use(middleware.Recoverer)
 
 	h.Get("/", h.HomePage)
@@ -100,6 +101,7 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func BuildMetrics(mType string, id string, val string) (model.Metrics, error) {
