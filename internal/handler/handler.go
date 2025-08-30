@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/rompil2/metrics_aggregator/internal/logger"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
@@ -39,7 +41,9 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Use(middleware.Recoverer)
 
 	h.Get("/", h.HomePage)
+	h.Post("/update", h.UpdateWithJSON)
 	h.Post("/update/{mtype}/{id}/{value}", h.UpdateMetrics)
+	h.Post("/value", h.GetMetricsJSON)
 	h.Get("/value/{mtype}/{id}", h.GetMetrics)
 
 	return h
@@ -102,6 +106,90 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+	log.Debug().Msg("Process updating a metrics")
+
+	var metricsModel model.Metrics
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	if err := decoder.Decode(&metricsModel); err != nil {
+		log.Error().Err(err).Msg("cannot parse the request")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// ID cannot be empty string
+	if len(metricsModel.ID) == 0 {
+		errMsg := "ID must be set"
+		log.Error().Msg(errMsg)
+		http.Error(w, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.Service.UpdateMetrics(&metricsModel); err != nil {
+		if strings.Contains(err.Error(), "created the new one") {
+			msg := fmt.Sprintf("A new metrics %s was added", metricsModel.ID)
+			log.Info().Msg(msg)
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, msg)
+			return
+		}
+		log.Error().Err(err).Msg("failed to update metrics")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Debug().Msg("the metrics was updated")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *HandlerMux) GetMetricsJSON(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+	log.Info().Msg("Process requesting a metrics")
+
+	var metricsModel model.Metrics
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	if err := decoder.Decode(&metricsModel); err != nil {
+		log.Error().Err(err).Msg("cannot parse the request")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// ID cannot be empty string
+	if len(metricsModel.ID) == 0 {
+		errMsg := "ID must be set"
+		log.Error().Msg(errMsg)
+		http.Error(w, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	if metricsModel.MType != model.Counter && metricsModel.MType != model.Gauge {
+		errMsg := fmt.Sprintf("unknown metrics type: %s", metricsModel.MType)
+		log.Error().Msg(errMsg)
+		http.Error(w, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	metrics, err := h.Service.GetMetrics(metricsModel.ID)
+	if err != nil {
+		errMsg := fmt.Sprintf("cannot find metrics with ID: %s", metricsModel.ID)
+		log.Error().Err(err).Msg(errMsg)
+		http.Error(w, errMsg, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(metrics); err != nil {
+		log.Error().Err(err).Msg("json encode error")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	log.Info().Msg("the metrics is returned back")
 }
 
 func BuildMetrics(mType string, id string, val string) (model.Metrics, error) {
