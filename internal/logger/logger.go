@@ -18,7 +18,7 @@ func init() {
 	globalLogger = zerolog.New(os.Stdout).
 		With().
 		Timestamp().
-		Logger()
+		Logger().Level(zerolog.InfoLevel)
 }
 
 // SetGlobalLogger устанавливает глобальный логгер
