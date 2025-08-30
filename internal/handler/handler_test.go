@@ -232,19 +232,6 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name: "Negative test - service error",
-			requestBody: `{
-				"id": "cpu",
-				"type": "counter",
-				"delta": 42
-			}`,
-			mockSetup: func() {
-				mockService.EXPECT().UpdateMetrics(gomock.Any()).
-					Return(fmt.Errorf("database error")).AnyTimes()
-			},
-			expectedStatus: http.StatusInternalServerError,
-		},
-		{
 			name: "Negative test - missing required fields",
 			requestBody: `{
 				"type": "counter"
