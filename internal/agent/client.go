@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +11,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
 const (
@@ -88,7 +92,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 }
 
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
-	const pathTemplate = "/update/%s/%s/%v"
+	const path = "/update"
 	var errs []error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -98,25 +102,38 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 
 		go func(key string, value any) {
 			defer wg.Done()
-
-			var path string
+			var m model.Metrics
+			m.ID = key
 			switch val := value.(type) {
-			case int64:
-				path = fmt.Sprintf(pathTemplate, "counter", key, val)
-			case float64:
-				path = fmt.Sprintf(pathTemplate, "gauge", key, val)
+			case int64: // It is a counter
+				m.MType = model.Counter
+				m.Delta = new(int64)
+				*(m.Delta) = val
+			case float64: // It is a gauge
+				m.MType = model.Gauge
+				m.Value = new(float64)
+				*(m.Value) = val
 			default:
 				return //Unknown metrics type
 			}
 
+			var buf bytes.Buffer
+			err := json.NewEncoder(&buf).Encode(m)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+				return
+			}
 			url := h.socket + path
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("create request for %s: %w", key, err))
 				mu.Unlock()
 				return
 			}
+			req.Header.Set("Content-Type", "application/json")
 
 			resp, err := h.client.Do(req)
 			if err != nil {
