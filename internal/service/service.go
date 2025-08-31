@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	ErrMetricCreated  = errors.New("Unknown metrics ID, created the new one")
+	ErrMetricCreated  = errors.New("unknown metrics ID, created the new one")
 	ErrMetricNotFound = errors.New("metric not found")
 )
 
