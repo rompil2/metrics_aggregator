@@ -131,7 +131,6 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.Service.UpdateMetrics(&metricsModel)
-	fmt.Println(err)
 	if err != nil {
 		h.handleUpdateError(w, err, metricsModel.ID, log)
 		return
