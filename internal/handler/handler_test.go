@@ -214,7 +214,7 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 			}`,
 			err:            service.ErrMetricCreated,
 			nUpdateCalls:   1,
-			expectedStatus: http.StatusCreated,
+			expectedStatus: http.StatusOK,
 		},
 		{
 			name: "Negative test - invalid JSON",

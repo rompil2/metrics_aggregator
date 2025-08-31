@@ -143,7 +143,7 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 func (h *HandlerMux) handleUpdateError(w http.ResponseWriter, err error, id string, log zerolog.Logger) {
 	if errors.Is(err, service.ErrMetricCreated) {
 		log.Info().Str("id", id).Msg("metric created")
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Metric %s created", id)
 		return
 	}
