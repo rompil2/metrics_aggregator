@@ -13,6 +13,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/rompil2/metrics_aggregator/internal/mocks"
 	"github.com/rompil2/metrics_aggregator/internal/model"
+	"github.com/rompil2/metrics_aggregator/internal/service"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -177,7 +178,8 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    string
-		mockSetup      func()
+		err            error
+		nUpdateCalls   int
 		expectedStatus int
 		expectedBody   string
 	}{
@@ -188,11 +190,9 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 				"type": "counter",
 				"delta": 42
 			}`,
-			mockSetup: func() {
-				mockService.EXPECT().UpdateMetrics(gomock.Any()).Return(nil).Times(1)
-			},
+			err:            nil,
+			nUpdateCalls:   1,
 			expectedStatus: http.StatusOK,
-			expectedBody:   "",
 		},
 		{
 			name: "Positive test - gauge metrics",
@@ -201,11 +201,9 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 				"type": "gauge",
 				"value": 3.14
 			}`,
-			mockSetup: func() {
-				mockService.EXPECT().UpdateMetrics(gomock.Any()).Return(nil).Times(1)
-			},
+			err:            nil,
+			nUpdateCalls:   1,
 			expectedStatus: http.StatusOK,
-			expectedBody:   "",
 		},
 		{
 			name: "Positive test - new metrics created",
@@ -214,12 +212,9 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 				"type": "counter",
 				"delta": 1
 			}`,
-			mockSetup: func() {
-				mockService.EXPECT().UpdateMetrics(gomock.Any()).
-					Return(fmt.Errorf("Unknown metrics ID, created the new one")).AnyTimes()
-			},
+			err:            service.ErrMetricCreated,
+			nUpdateCalls:   1,
 			expectedStatus: http.StatusCreated,
-			expectedBody:   "A new metrics new_metric was added",
 		},
 		{
 			name: "Negative test - invalid JSON",
@@ -228,7 +223,7 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 				"type": "counter",
 				"delta": "not_a_number"
 			}`,
-			mockSetup:      func() {},
+			err:            nil,
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
@@ -236,14 +231,28 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 			requestBody: `{
 				"type": "counter"
 			}`,
-			mockSetup:      func() {},
+			err:            nil,
 			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Negative test - service error",
+			requestBody: `{
+				"id": "cpu",
+				"type": "counter",
+				"delta": 65
+			}`,
+			err:            fmt.Errorf("any error"),
+			nUpdateCalls:   1,
+			expectedStatus: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
+
 		t.Run(tt.name, func(t *testing.T) {
-			tt.mockSetup()
+			if tt.nUpdateCalls > 0 {
+				mockService.EXPECT().UpdateMetrics(gomock.Any()).Times(tt.nUpdateCalls).Return(tt.err)
+			}
 			h := NewHandlerMux(mockService, nil)
 
 			r := httptest.NewRequest(http.MethodPost, "/update", bytes.NewBufferString(tt.requestBody))
