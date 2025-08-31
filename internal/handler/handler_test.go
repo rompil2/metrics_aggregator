@@ -142,8 +142,8 @@ func TestHandlerMux_ValueGet(t *testing.T) {
 			"Negative test. Without counter ID.", "/value/counter", true, http.StatusNotFound,
 		}, {
 			"Negative test. Unknow ID", "/value/counter/memory", true, http.StatusNotFound,
-		}, {
-			"Negative test. Empty path", "/value/", true, http.StatusNotFound,
+			// }, {
+			// "Negative test. Empty path", "/value/", true, http.StatusNotFound, // not actual any more.
 		},
 	}
 	ctrl := gomock.NewController(t)
@@ -408,7 +408,7 @@ func TestHandlerMux_GetMetricsJSON_ContentType(t *testing.T) {
 		"type": "counter"
 	}`
 
-	r := httptest.NewRequest(http.MethodPost, "/value", bytes.NewBufferString(requestBody))
+	r := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewBufferString(requestBody))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -451,7 +451,7 @@ func TestHandlerMux_UpdateWithJSON_EdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHandlerMux(mockService, nil)
 
-			r := httptest.NewRequest(http.MethodPost, "/update", bytes.NewBufferString(tt.requestBody))
+			r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
