@@ -255,7 +255,7 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 			}
 			h := NewHandlerMux(mockService, nil)
 
-			r := httptest.NewRequest(http.MethodPost, "/update", bytes.NewBufferString(tt.requestBody))
+			r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -366,7 +366,7 @@ func TestHandlerMux_GetMetricsJSON(t *testing.T) {
 			tt.mockSetup()
 			h := NewHandlerMux(mockService, nil)
 
-			r := httptest.NewRequest(http.MethodPost, "/value", bytes.NewBufferString(tt.requestBody))
+			r := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 

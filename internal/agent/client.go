@@ -92,7 +92,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 }
 
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
-	const path = "/update"
+	const path = "/update/"
 	var errs []error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
