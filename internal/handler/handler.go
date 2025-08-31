@@ -43,9 +43,9 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Use(middleware.Recoverer)
 
 	h.Get("/", h.HomePage)
-	h.Post("/update", h.UpdateWithJSON)
+	h.Post("/update/", h.UpdateWithJSON)
 	h.Post("/update/{mtype}/{id}/{value}", h.UpdateMetrics)
-	h.Post("/value", h.GetMetricsJSON)
+	h.Post("/value/", h.GetMetricsJSON)
 	h.Get("/value/{mtype}/{id}", h.GetMetrics)
 
 	return h
