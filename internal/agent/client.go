@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -117,16 +118,26 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 				return //Unknown metrics type
 			}
 
-			var buf bytes.Buffer
-			err := json.NewEncoder(&buf).Encode(m)
+			buf, err := json.Marshal(m)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
 				return
 			}
+
+			zbuf := bytes.NewBuffer(nil)
+			zb := gzip.NewWriter(zbuf)
+			_, err = zb.Write(buf)
+			defer zb.Close()
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("compressing data  for %s: %w", key, err))
+				mu.Unlock()
+				return
+			}
 			url := h.socket + path
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, zbuf)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("create request for %s: %w", key, err))
@@ -134,6 +145,7 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 				return
 			}
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Encoding", "gzip")
 
 			resp, err := h.client.Do(req)
 			if err != nil {

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"compress/gzip"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rompil2/metrics_aggregator/internal/logger"
@@ -72,4 +74,90 @@ func NaiveLoggerMiddleware(next http.Handler) http.Handler {
 
 	}
 	return http.HandlerFunc(NaiveLogger)
+}
+
+func MiddlewareRequestUnzip(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "Invalid gzip body", http.StatusBadRequest)
+				return
+			}
+			defer gz.Close()
+
+			// Заменяем тело запроса на распакованное
+			r.Body = gz
+			r.Header.Del("Content-Length")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func MiddlewareResponceZip(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// skip if a client doesn't know how to handle achived responce
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Not all content type should be compressed, only application/json и text/html.
+		contentType := w.Header().Get("Content-Type")
+		if !shouldCompress(contentType) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Replace ordinary responceWriter with our custom compressWriter
+		cw := newCompressWriter(w)
+		w = cw
+		defer cw.Close()
+
+	})
+}
+
+// Checks If the type good for compressing
+func shouldCompress(contentType string) bool {
+	compressibleTypes := []string{
+		"text/html",
+		"application/json",
+	}
+
+	for _, t := range compressibleTypes {
+		if strings.HasPrefix(contentType, t) {
+			return true
+		}
+	}
+	return false
+}
+
+type compressWriter struct {
+	w  http.ResponseWriter
+	zw *gzip.Writer
+}
+
+func newCompressWriter(w http.ResponseWriter) *compressWriter {
+	return &compressWriter{
+		w:  w,
+		zw: gzip.NewWriter(w),
+	}
+}
+
+func (c *compressWriter) Header() http.Header {
+	return c.w.Header()
+}
+
+func (c *compressWriter) Write(p []byte) (int, error) {
+	return c.zw.Write(p)
+}
+
+func (c *compressWriter) WriteHeader(statusCode int) {
+	if statusCode < 300 {
+		c.w.Header().Set("Content-Encoding", "gzip")
+	}
+	c.w.WriteHeader(statusCode)
+}
+
+func (c *compressWriter) Close() {
+	c.zw.Close()
 }

@@ -38,6 +38,9 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Router = chi.NewRouter()
 	h.Use(middleware.RequestID)
 	h.Use(middleware.RealIP)
+	// h.Use(middleware.Compress(1, "text/html", "application/json"))
+	// h.Use(MiddlewareRequestUnzip)
+	h.Use(MiddlewareResponceZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
 	h.Use(NaiveLoggerMiddleware)
 	h.Use(middleware.Recoverer)
@@ -57,6 +60,7 @@ func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "text/html")
 	h.tmpl.Execute(w, metrics)
 }
 
