@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rompil2/metrics_aggregator/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,7 @@ func TestHTTPClient_Run_ContextCancellation(t *testing.T) {
 
 	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080)
 	ctx, cancel := context.WithCancel(context.Background())
-	metricsCh := make(chan map[string]interface{})
+	metricsCh := make(chan map[string]any)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -122,7 +123,7 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 	testCases := []struct {
 		name          string
 		serverHandler http.HandlerFunc
-		metrics       map[string]interface{}
+		metrics       map[string]any
 		expectError   bool
 	}{
 		{
@@ -130,7 +131,7 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 			},
-			metrics:     map[string]interface{}{"test": int64(1)},
+			metrics:     map[string]any{"test": int64(1)},
 			expectError: true,
 		},
 		{
@@ -138,8 +139,8 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			},
-			metrics:     map[string]interface{}{"invalid": "string"},
-			expectError: false, // Неподдерживаемые типы просто игнорируются
+			metrics:     map[string]any{"invalid": "string"},
+			expectError: true, // Неподдерживаемые типы просто игнорируются
 		},
 		{
 			name: "RequestError",
@@ -150,7 +151,7 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 				conn, _, _ := hj.Hijack()
 				conn.Close()
 			},
-			metrics:     map[string]interface{}{"test": int64(1)},
+			metrics:     map[string]any{"test": int64(1)},
 			expectError: true,
 		},
 	}
@@ -218,4 +219,87 @@ func TestHTTPClient_Run_ChannelClosed(t *testing.T) {
 	// Проверяем, что Run не завершился с ошибкой
 	cancel()
 	wg.Wait()
+}
+
+func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
+	type args struct {
+		key   string
+		value any
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    model.Metrics
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "Positive test. new counter",
+			args: args{
+				key:   "counter",
+				value: int64(42),
+			},
+			want: model.Metrics{
+				ID:    "counter",
+				MType: model.Counter,
+				Delta: func() *int64 { v := int64(42); return &v }(),
+			},
+			wantErr: false,
+		},
+		{
+			name: "Positive test. new gauge",
+			args: args{
+				key:   "gauge",
+				value: float64(3.14),
+			},
+			want: model.Metrics{
+				ID:    "gauge",
+				MType: model.Gauge,
+				Value: func() *float64 { v := float64(3.14); return &v }(),
+			},
+			wantErr: false,
+		},
+		{
+			name: "Negative test. unknown type string",
+			args: args{
+				key:   "invalid",
+				value: "string_value",
+			},
+			want: model.Metrics{
+				ID: "invalid",
+			},
+			wantErr: true,
+			errMsg:  "unknown metric type for key invalid",
+		},
+	}
+
+	p := &HTTPMetricProcessor{}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := p.CreateMetric(tt.args.key, tt.args.value)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.EqualError(t, err, tt.errMsg)
+				}
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want.ID, got.ID)
+			assert.Equal(t, tt.want.MType, got.MType)
+
+			if tt.want.Delta != nil {
+				assert.NotNil(t, got.Delta)
+				assert.Equal(t, *tt.want.Delta, *got.Delta)
+			}
+
+			if tt.want.Value != nil {
+				assert.NotNil(t, got.Value)
+				assert.Equal(t, *tt.want.Value, *got.Value)
+			}
+		})
+	}
 }

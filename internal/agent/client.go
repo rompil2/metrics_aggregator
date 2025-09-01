@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"maps"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 const (
 	errChSize            = 1
 	lenOfEmptyCollection = 0
+	updatePath           = "/update/"
 )
 
 type Metrics = map[string]any
@@ -93,7 +93,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 }
 
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
-	const path = "/update/"
+
 	var errs []error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -103,40 +103,42 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 
 		go func(key string, value any) {
 			defer wg.Done()
-			var m model.Metrics
-			m.ID = key
-			switch val := value.(type) {
-			case int64: // It is a counter
-				m.MType = model.Counter
-				m.Delta = new(int64)
-				*(m.Delta) = val
-			case float64: // It is a gauge
-				m.MType = model.Gauge
-				m.Value = new(float64)
-				*(m.Value) = val
-			default:
-				return //Unknown metrics type
-			}
-
-			buf, err := json.Marshal(m)
+			// prepare data
+			mp := HTTPMetricProcessor{}
+			metric, err := mp.CreateMetric(key, value)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
 				return
 			}
-
+			buf, err := mp.MarshalMetric(metric)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+				return
+			}
+			// compress data
 			zbuf := bytes.NewBuffer(nil)
 			zb := gzip.NewWriter(zbuf)
 			_, err = zb.Write(buf)
-			defer zb.Close()
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("compressing data  for %s: %w", key, err))
 				mu.Unlock()
 				return
 			}
-			url := h.socket + path
+			defer zb.Close()
+			err = zb.Flush()
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("flushing data  for %s: %w", key, err))
+				mu.Unlock()
+				return
+			}
+			// Send compressed data
+			url := h.socket + updatePath
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, zbuf)
 			if err != nil {
 				mu.Lock()
@@ -156,16 +158,11 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 			}
 			defer resp.Body.Close()
 
-			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("read response for %s: %w", key, err))
-				mu.Unlock()
-			}
-
 			if resp.StatusCode >= http.StatusBadRequest {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("bad status for %s: %d", key, resp.StatusCode))
 				mu.Unlock()
+				return
 			}
 		}(k, v)
 	}
@@ -176,4 +173,33 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 		return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errs[0])
 	}
 	return nil
+}
+
+type MetricProcessor interface {
+	CreateMetric(key string, value any) (model.Metrics, error)
+	MarshalMetric(metric model.Metrics) ([]byte, error)
+}
+
+type HTTPMetricProcessor struct{}
+
+func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics, error) {
+	var m model.Metrics
+	m.ID = key
+
+	switch val := value.(type) {
+	case int64:
+		m.MType = model.Counter
+		m.Delta = &val
+	case float64:
+		m.MType = model.Gauge
+		m.Value = &val
+	default:
+		return m, fmt.Errorf("unknown metric type for key %s", key)
+	}
+
+	return m, nil
+}
+
+func (p *HTTPMetricProcessor) MarshalMetric(metric model.Metrics) ([]byte, error) {
+	return json.Marshal(metric)
 }
