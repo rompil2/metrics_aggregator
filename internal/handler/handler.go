@@ -39,8 +39,8 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Use(middleware.RequestID)
 	h.Use(middleware.RealIP)
 	// h.Use(middleware.Compress(1, "text/html", "application/json"))
-	// h.Use(MiddlewareRequestUnzip)
-	h.Use(MiddlewareResponceZip)
+	h.Use(MiddlewareRequestUnzip)
+	h.Use(MiddlewareResponseZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
 	h.Use(NaiveLoggerMiddleware)
 	h.Use(middleware.Recoverer)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"compress/gzip"
 	"net/http"
 	"strings"
@@ -94,24 +95,35 @@ func MiddlewareRequestUnzip(next http.Handler) http.Handler {
 	})
 }
 
-func MiddlewareResponceZip(next http.Handler) http.Handler {
+func MiddlewareResponseZip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// skip if a client doesn't know how to handle achived responce
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Not all content type should be compressed, only application/json и text/html.
-		contentType := w.Header().Get("Content-Type")
-		if !shouldCompress(contentType) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// Replace ordinary responceWriter with our custom compressWriter
 		cw := newCompressWriter(w)
-		w = cw
-		defer cw.Close()
+		next.ServeHTTP(cw, r)
+		doeClientSupportGZIP := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+		if doeClientSupportGZIP && shouldCompress(cw.Header().Get("Content-Type")) {
+			if cw.buf.Len() > 0 {
+				w.Header().Set("Content-encoding", "gzip")
+				w.Header().Del("Content-Length")
+				gz := gzip.NewWriter(w)
+				defer gz.Close()
+				_, err := gz.Write(cw.buf.Bytes())
+				if err != nil {
+					http.Error(w, "Error compressing response", http.StatusInternalServerError)
+				} else {
+					err := gz.Flush()
+					if err != nil {
+						http.Error(w, "Error flushing response", http.StatusInternalServerError)
+					}
+				}
+			}
+		} else {
+			// send body as is
+			w.Header().Del("Content-Length")
+			_, err := w.Write((cw.buf.Bytes()))
+			if err != nil {
+				http.Error(w, "Error sending response", http.StatusInternalServerError)
+			}
+		}
 
 	})
 }
@@ -132,14 +144,14 @@ func shouldCompress(contentType string) bool {
 }
 
 type compressWriter struct {
-	w  http.ResponseWriter
-	zw *gzip.Writer
+	w   http.ResponseWriter
+	buf *bytes.Buffer
 }
 
 func newCompressWriter(w http.ResponseWriter) *compressWriter {
 	return &compressWriter{
-		w:  w,
-		zw: gzip.NewWriter(w),
+		w:   w,
+		buf: bytes.NewBuffer([]byte{}),
 	}
 }
 
@@ -148,16 +160,9 @@ func (c *compressWriter) Header() http.Header {
 }
 
 func (c *compressWriter) Write(p []byte) (int, error) {
-	return c.zw.Write(p)
+	return c.buf.Write(p)
 }
 
 func (c *compressWriter) WriteHeader(statusCode int) {
-	if statusCode < 300 {
-		c.w.Header().Set("Content-Encoding", "gzip")
-	}
 	c.w.WriteHeader(statusCode)
-}
-
-func (c *compressWriter) Close() {
-	c.zw.Close()
 }
