@@ -52,6 +52,85 @@ func TestSocketConfig_String(t *testing.T) {
 	}
 }
 
+func TestServerConfig(t *testing.T) {
+	tests := []struct {
+		name           string
+		envVars        map[string]string
+		flags          []string
+		expectedConfig ServerConfig
+	}{
+		{
+			name:    "default values",
+			envVars: map[string]string{
+				// Пусто - используем значения по умолчанию
+			},
+			expectedConfig: ServerConfig{
+				StoreConfig: StoreConfig{
+					StoreInterval:   defaultStoreInterval * time.Second,
+					FileStoragePath: defaultFileStoragePath,
+					Restore:         defaultRestore,
+				},
+				SocketConfig: SocketConfig{
+					Host: defaultHost,
+					Port: defaultPort,
+				},
+			},
+		},
+		{
+			name:    "values from flags",
+			envVars: map[string]string{},
+			flags:   []string{"-a", "127.0.0.1:9092", "-i", "20", "-f", "temp.tmp", "-r"},
+			expectedConfig: ServerConfig{
+				StoreConfig: StoreConfig{
+					StoreInterval:   20 * time.Second,
+					FileStoragePath: "temp.tmp",
+					Restore:         true,
+				},
+				SocketConfig: SocketConfig{
+					Host: "127.0.0.1",
+					Port: 9092,
+				},
+			},
+		},
+		{
+			name: "values from Env Vars",
+			envVars: map[string]string{
+				"ADDRESS":           "0.0.0.0:8123",
+				"STORE_INTERVAL":    "2",
+				"FILE_STORAGE_PATH": "/tmp/tmp.tmp",
+				"RESTORE":           "false",
+			},
+			flags: []string{"-a", "127.0.0.1:9092", "-i", "20", "-f", "temp.tmp", "-r"},
+			expectedConfig: ServerConfig{
+				StoreConfig: StoreConfig{
+					StoreInterval:   2 * time.Second,
+					FileStoragePath: "/tmp/tmp.tmp",
+					Restore:         false,
+				},
+				SocketConfig: SocketConfig{
+					Host: "0.0.0.0",
+					Port: 8123,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Устанавливаем переменные окружения для теста
+			for k, v := range tt.envVars {
+				os.Setenv(k, v)
+				defer os.Unsetenv(k)
+			}
+
+			// Получаем конфиг
+			config := LoadServerConfig(tt.flags)
+
+			// Проверяем значения
+			assert.Equal(t, config, tt.expectedConfig)
+		})
+	}
+}
+
 func TestLoadAgentConfig(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -120,178 +199,178 @@ func TestLoadAgentConfig(t *testing.T) {
 	}
 }
 
-func TestGetEnvGeneral(t *testing.T) {
-	tests := []struct {
-		name        string
-		envVarName  string
-		envVarValue string
-		expected    interface{}
-		expectError bool
-	}{
-		{
-			name:        "string value",
-			envVarName:  "TEST_STRING",
-			envVarValue: "test_value",
-			expected:    "test_value",
-			expectError: false,
-		},
-		{
-			name:        "integer value",
-			envVarName:  "TEST_INT",
-			envVarValue: "42",
-			expected:    42,
-			expectError: false,
-		},
-		{
-			name:        "missing variable",
-			envVarName:  "NON_EXISTENT",
-			envVarValue: "",
-			expected:    0,
-			expectError: true,
-		},
-		{
-			name:        "invalid integer",
-			envVarName:  "INVALID_INT",
-			envVarValue: "not_a_number",
-			expected:    0,
-			expectError: true,
-		},
-	}
+// func TestGetEnvGeneral(t *testing.T) {
+// 	tests := []struct {
+// 		name        string
+// 		envVarName  string
+// 		envVarValue string
+// 		expected    interface{}
+// 		expectError bool
+// 	}{
+// 		{
+// 			name:        "string value",
+// 			envVarName:  "TEST_STRING",
+// 			envVarValue: "test_value",
+// 			expected:    "test_value",
+// 			expectError: false,
+// 		},
+// 		{
+// 			name:        "integer value",
+// 			envVarName:  "TEST_INT",
+// 			envVarValue: "42",
+// 			expected:    42,
+// 			expectError: false,
+// 		},
+// 		{
+// 			name:        "missing variable",
+// 			envVarName:  "NON_EXISTENT",
+// 			envVarValue: "",
+// 			expected:    0,
+// 			expectError: true,
+// 		},
+// 		{
+// 			name:        "invalid integer",
+// 			envVarName:  "INVALID_INT",
+// 			envVarValue: "not_a_number",
+// 			expected:    0,
+// 			expectError: true,
+// 		},
+// 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envVarValue != "" {
-				os.Setenv(tt.envVarName, tt.envVarValue)
-				defer os.Unsetenv(tt.envVarName)
-			}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			if tt.envVarValue != "" {
+// 				os.Setenv(tt.envVarName, tt.envVarValue)
+// 				defer os.Unsetenv(tt.envVarName)
+// 			}
 
-			// Тестируем для string
-			if str, ok := tt.expected.(string); ok {
-				result, err := getEnvGeneral[string](tt.envVarName)
-				if tt.expectError {
-					assert.Error(t, err)
-				} else {
-					assert.NoError(t, err)
-					assert.Equal(t, str, result)
-				}
-			}
+// 			// Тестируем для string
+// 			if str, ok := tt.expected.(string); ok {
+// 				result, err := getEnvGeneral[string](tt.envVarName)
+// 				if tt.expectError {
+// 					assert.Error(t, err)
+// 				} else {
+// 					assert.NoError(t, err)
+// 					assert.Equal(t, str, result)
+// 				}
+// 			}
 
-			// Тестируем для int
-			if num, ok := tt.expected.(int); ok {
-				result, err := getEnvGeneral[int](tt.envVarName)
-				if tt.expectError {
-					assert.Error(t, err)
-				} else {
-					assert.NoError(t, err)
-					assert.Equal(t, num, result)
-				}
-			}
-		})
-	}
-}
+// 			// Тестируем для int
+// 			if num, ok := tt.expected.(int); ok {
+// 				result, err := getEnvGeneral[int](tt.envVarName)
+// 				if tt.expectError {
+// 					assert.Error(t, err)
+// 				} else {
+// 					assert.NoError(t, err)
+// 					assert.Equal(t, num, result)
+// 				}
+// 			}
+// 		})
+// 	}
+// }
 
-func TestGetEnvWithDefaults(t *testing.T) {
-	tests := []struct {
-		name         string
-		envVarName   string
-		envVarValue  string
-		defaultValue any
-		expected     any
-	}{
-		{
-			name:         "string with default",
-			envVarName:   "MISSING_STRING",
-			envVarValue:  "",
-			defaultValue: "default",
-			expected:     "default",
-		},
-		{
-			name:         "string with value",
-			envVarName:   "EXISTING_STRING",
-			envVarValue:  "actual",
-			defaultValue: "default",
-			expected:     "actual",
-		},
-		{
-			name:         "uint with default",
-			envVarName:   "MISSING_UINT",
-			envVarValue:  "",
-			defaultValue: uint(999),
-			expected:     uint(999),
-		},
-		{
-			name:         "uint with value",
-			envVarName:   "EXISTING_UINT",
-			envVarValue:  "123",
-			defaultValue: uint(999),
-			expected:     uint(123),
-		},
-	}
+// func TestGetEnvWithDefaults(t *testing.T) {
+// 	tests := []struct {
+// 		name         string
+// 		envVarName   string
+// 		envVarValue  string
+// 		defaultValue any
+// 		expected     any
+// 	}{
+// 		{
+// 			name:         "string with default",
+// 			envVarName:   "MISSING_STRING",
+// 			envVarValue:  "",
+// 			defaultValue: "default",
+// 			expected:     "default",
+// 		},
+// 		{
+// 			name:         "string with value",
+// 			envVarName:   "EXISTING_STRING",
+// 			envVarValue:  "actual",
+// 			defaultValue: "default",
+// 			expected:     "actual",
+// 		},
+// 		{
+// 			name:         "uint with default",
+// 			envVarName:   "MISSING_UINT",
+// 			envVarValue:  "",
+// 			defaultValue: uint(999),
+// 			expected:     uint(999),
+// 		},
+// 		{
+// 			name:         "uint with value",
+// 			envVarName:   "EXISTING_UINT",
+// 			envVarValue:  "123",
+// 			defaultValue: uint(999),
+// 			expected:     uint(123),
+// 		},
+// 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envVarValue != "" {
-				os.Setenv(tt.envVarName, tt.envVarValue)
-				defer os.Unsetenv(tt.envVarName)
-			}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			if tt.envVarValue != "" {
+// 				os.Setenv(tt.envVarName, tt.envVarValue)
+// 				defer os.Unsetenv(tt.envVarName)
+// 			}
 
-			// Тестируем для string
-			if str, ok := tt.expected.(string); ok {
-				defaultVal := tt.defaultValue.(string)
-				result := getEnvWithDefaults[string](tt.envVarName, defaultVal)
-				assert.Equal(t, str, result)
-			}
+// 			// Тестируем для string
+// 			if str, ok := tt.expected.(string); ok {
+// 				defaultVal := tt.defaultValue.(string)
+// 				result := getEnvWithDefaults[string](tt.envVarName, defaultVal)
+// 				assert.Equal(t, str, result)
+// 			}
 
-			// Тестируем для uint
-			if num, ok := tt.expected.(uint); ok {
-				defaultVal := tt.defaultValue.(uint)
-				result := getEnvWithDefaults[uint](tt.envVarName, defaultVal)
-				assert.Equal(t, num, result)
-			}
-		})
-	}
-}
+// 			// Тестируем для uint
+// 			if num, ok := tt.expected.(uint); ok {
+// 				defaultVal := tt.defaultValue.(uint)
+// 				result := getEnvWithDefaults[uint](tt.envVarName, defaultVal)
+// 				assert.Equal(t, num, result)
+// 			}
+// 		})
+// 	}
+// }
 
-func TestGetEnvDuration(t *testing.T) {
-	tests := []struct {
-		name         string
-		envVarName   string
-		envVarValue  string
-		defaultValue time.Duration
-		expected     time.Duration
-	}{
-		{
-			name:         "valid duration",
-			envVarName:   "TEST_DURATION",
-			envVarValue:  "1s",
-			defaultValue: 2 * time.Second,
-			expected:     1 * time.Second,
-		},
-		{
-			name:         "invalid duration",
-			envVarName:   "INVALID_DURATION",
-			envVarValue:  "not_a_duration",
-			defaultValue: time.Hour,
-			expected:     time.Hour,
-		},
-		{
-			name:         "missing variable",
-			envVarName:   "MISSING_DURATION",
-			envVarValue:  "",
-			defaultValue: time.Minute,
-			expected:     time.Minute,
-		},
-	}
+// func TestGetEnvDuration(t *testing.T) {
+// 	tests := []struct {
+// 		name         string
+// 		envVarName   string
+// 		envVarValue  string
+// 		defaultValue time.Duration
+// 		expected     time.Duration
+// 	}{
+// 		{
+// 			name:         "valid duration",
+// 			envVarName:   "TEST_DURATION",
+// 			envVarValue:  "1s",
+// 			defaultValue: 2 * time.Second,
+// 			expected:     1 * time.Second,
+// 		},
+// 		{
+// 			name:         "invalid duration",
+// 			envVarName:   "INVALID_DURATION",
+// 			envVarValue:  "not_a_duration",
+// 			defaultValue: time.Hour,
+// 			expected:     time.Hour,
+// 		},
+// 		{
+// 			name:         "missing variable",
+// 			envVarName:   "MISSING_DURATION",
+// 			envVarValue:  "",
+// 			defaultValue: time.Minute,
+// 			expected:     time.Minute,
+// 		},
+// 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envVarValue != "" {
-				os.Setenv(tt.envVarName, tt.envVarValue)
-				defer os.Unsetenv(tt.envVarName)
-			}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			if tt.envVarValue != "" {
+// 				os.Setenv(tt.envVarName, tt.envVarValue)
+// 				defer os.Unsetenv(tt.envVarName)
+// 			}
 
-			result := getEnvDuration(tt.envVarName, tt.defaultValue)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
+// 			result := getEnvDuration(tt.envVarName, tt.defaultValue)
+// 			assert.Equal(t, tt.expected, result)
+// 		})
+// 	}
+// }

@@ -14,21 +14,27 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository"
 	"github.com/rompil2/metrics_aggregator/internal/service"
+	"github.com/rompil2/metrics_aggregator/internal/store"
 )
 
 func main() {
-	socket := config.LoadServerConfig()
+	cfg := config.LoadServerConfig(os.Args[1:])
 
 	repository, err := repository.NewMemStorage()
 	if err != nil {
 		log.Fatal(err)
 	}
-	srvc := service.NewMetricService(repository)
+	store, err := store.NewStore(repository, cfg.StoreConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	srvc := service.NewMetricService(store)
 
 	handler := handler.NewHandlerMux(&srvc, template.Must(template.ParseFiles("templates/index.html")))
 
 	server := &http.Server{
-		Addr:    socket.String(),
+		Addr:    cfg.String(),
 		Handler: handler,
 	}
 

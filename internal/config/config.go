@@ -7,16 +7,18 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
-
-	"golang.org/x/exp/constraints"
 )
 
 const (
-	defaultHost           = "localhost"
-	defaultPort           = 8080
-	defaultPollInterval   = 2
-	defaultReportInterval = 10
+	defaultHost            = "localhost"
+	defaultPort            = 8080
+	defaultPollInterval    = 2
+	defaultReportInterval  = 10
+	defaultStoreInterval   = 300
+	defaultFileStoragePath = "./storage.txt"
+	defaultRestore         = false
 )
 
 type SocketConfig struct {
@@ -25,9 +27,7 @@ type SocketConfig struct {
 }
 
 func (s *SocketConfig) String() string {
-	port64 := uint64(s.Port)
-	portAsString := strconv.FormatUint(port64, 10)
-	return net.JoinHostPort(s.Host, portAsString)
+	return net.JoinHostPort(s.Host, strconv.FormatUint(uint64(s.Port), 10))
 }
 
 func (s *SocketConfig) Set(flagVal string) error {
@@ -35,30 +35,74 @@ func (s *SocketConfig) Set(flagVal string) error {
 	if err != nil {
 		return fmt.Errorf("invalid address format: %w", err)
 	}
-	port, err := strconv.Atoi(portStr)
+
+	port, err := strconv.ParseUint(portStr, 10, 16)
 	if err != nil {
-		return errors.New("port should be a valid decimal number")
+		return errors.New("port should be a valid number")
 	}
-	if port > 65535 { // The maximum possible port number for IPv4
-		return errors.New("port should be not grater than 65535")
+	if port > 65535 {
+		return errors.New("port should not be greater than 65535")
 	}
-	s.Host = host // it migth be an empty string
+
+	s.Host = host
 	s.Port = uint(port)
 	return nil
 }
 
-func LoadServerConfig() SocketConfig {
-	socket := new(SocketConfig)
-	socket.Host = defaultHost
-	socket.Port = defaultPort
-	flag.Var(socket, "a", "-a=<host>:<port>")
-	flag.Parse()
+type StoreConfig struct {
+	StoreInterval   time.Duration
+	FileStoragePath string
+	Restore         bool
+}
 
-	if val, err := getEnv("ADDRESS"); err == nil {
+type ServerConfig struct {
+	SocketConfig
+	StoreConfig
+}
+
+func LoadServerConfig(args []string) ServerConfig {
+	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
+
+	socket := &SocketConfig{
+		Host: defaultHost,
+		Port: defaultPort,
+	}
+	flagSet.Var(socket, "a", "-a=<host>:<port>")
+
+	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
+	fileStoragePath := flagSet.String("f", defaultFileStoragePath, "path to a file to store data")
+	restore := flagSet.Bool("r", defaultRestore, "should restore data")
+
+	if err := flagSet.Parse(args); err != nil {
+		fmt.Printf("Error parsing flags: %v\n", err)
+	}
+
+	if val, ok := os.LookupEnv("ADDRESS"); ok {
 		socket.Set(val)
 	}
 
-	return *socket
+	if val, ok := os.LookupEnv("STORE_INTERVAL"); ok {
+		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
+			*storeInterval = uint(parsed)
+		}
+	}
+
+	if val, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
+		*fileStoragePath = val
+	}
+
+	if val, ok := os.LookupEnv("RESTORE"); ok {
+		*restore = strings.ToLower(val) == "true"
+	}
+
+	return ServerConfig{
+		SocketConfig: *socket,
+		StoreConfig: StoreConfig{
+			StoreInterval:   time.Duration(*storeInterval) * time.Second,
+			FileStoragePath: *fileStoragePath,
+			Restore:         *restore,
+		},
+	}
 }
 
 type AgentConfig struct {
@@ -68,74 +112,40 @@ type AgentConfig struct {
 }
 
 func LoadAgentConfig(args []string) AgentConfig {
-	ac := AgentConfig{}
 	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
-	ac.Host = defaultHost
-	ac.Port = defaultPort
-	flagSet.Var(&ac.SocketConfig, "a", "-a=<host>:<port>")
-	pollInterval := flagSet.Uint("p", defaultPollInterval, "polling Interval in sec")
-	reportInterval := flagSet.Uint("r", defaultReportInterval, "report Interval in sec")
-	flagSet.Parse(args)
 
-	if val, err := getEnvUint("POLL_INTERVAL"); err == nil {
-		*pollInterval = val
+	socket := SocketConfig{
+		Host: defaultHost,
+		Port: defaultPort,
 	}
-	if val, err := getEnvUint("REPORT_INTERVAL"); err == nil {
-		*reportInterval = val
-	}
-	if val, err := getEnv("ADDRESS"); err == nil {
-		ac.Set(val)
+	flagSet.Var(&socket, "a", "-a=<host>:<port>")
+
+	pollInterval := flagSet.Uint("p", defaultPollInterval, "polling interval in seconds")
+	reportInterval := flagSet.Uint("r", defaultReportInterval, "report interval in seconds")
+
+	if err := flagSet.Parse(args); err != nil {
+		fmt.Printf("Error parsing flags: %v\n", err)
 	}
 
-	ac.PollInterval = time.Duration(*pollInterval) * time.Second
-	ac.ReportInterval = time.Duration(*reportInterval) * time.Second
-	return ac
-}
-
-func getEnvGeneral[T constraints.Integer | ~string](envVarName string) (T, error) {
-	var noResult T
-
-	envVarStr, exists := os.LookupEnv(envVarName)
-	if !exists {
-		return noResult, fmt.Errorf("%s does not exist", envVarName)
+	if val, ok := os.LookupEnv("ADDRESS"); ok {
+		socket.Set(val)
 	}
-	switch any(noResult).(type) {
 
-	case string:
-		return any(envVarStr).(T), nil
-
-	case time.Duration:
-		// I suppose the duration is set in seconds with a fraction part
-		d, err := time.ParseDuration(envVarStr)
-		if err != nil {
-			return noResult, fmt.Errorf("cannot convert %s to Duration type", envVarStr)
+	if val, ok := os.LookupEnv("POLL_INTERVAL"); ok {
+		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
+			*pollInterval = uint(parsed)
 		}
-		return any(d).(T), nil
-	case int:
-		v, err := strconv.Atoi(envVarStr)
-		if err != nil {
-			return noResult, fmt.Errorf("cannot convert %s to number", envVarStr)
+	}
+
+	if val, ok := os.LookupEnv("REPORT_INTERVAL"); ok {
+		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
+			*reportInterval = uint(parsed)
 		}
-		return any(v).(T), nil
-	case uint:
-		v, err := strconv.Atoi(envVarStr)
-		if err != nil {
-			return noResult, fmt.Errorf("cannot convert %s to number", envVarStr)
-		}
-		return any(uint(v)).(T), nil
-	default:
-		panic("the type %T is not supported yet")
+	}
+
+	return AgentConfig{
+		SocketConfig:   socket,
+		PollInterval:   time.Duration(*pollInterval) * time.Second,
+		ReportInterval: time.Duration(*reportInterval) * time.Second,
 	}
 }
-
-func getEnvWithDefaults[T constraints.Integer | string](envVarName string, defaultValue T) T {
-	value, err := getEnvGeneral[T](envVarName)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-var getEnvDuration = getEnvWithDefaults[time.Duration]
-var getEnv = getEnvGeneral[string]
-var getEnvUint = getEnvGeneral[uint]
