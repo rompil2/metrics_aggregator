@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rompil2/metrics_aggregator/internal/logger"
 )
 
 const (
@@ -25,6 +27,8 @@ type SocketConfig struct {
 	Host string
 	Port uint
 }
+
+var log = logger.Get()
 
 func (s *SocketConfig) String() string {
 	return net.JoinHostPort(s.Host, strconv.FormatUint(uint64(s.Port), 10))
@@ -74,25 +78,29 @@ func LoadServerConfig(args []string) ServerConfig {
 	restore := flagSet.Bool("r", defaultRestore, "should restore data")
 
 	if err := flagSet.Parse(args); err != nil {
-		fmt.Printf("Error parsing flags: %v\n", err)
+		log.Error().Err(err).Msg("Error parsing flags")
 	}
 
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
 		socket.Set(val)
+		log.Info().Str("ADDRESS", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("STORE_INTERVAL"); ok {
 		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
 			*storeInterval = uint(parsed)
+			log.Info().Str("STORE_INTERVAL", val).Send()
 		}
 	}
 
 	if val, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
 		*fileStoragePath = val
+		log.Info().Str("FILE_STORAGE_PATH", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("RESTORE"); ok {
 		*restore = strings.ToLower(val) == "true"
+		log.Info().Bool("FILE_STORAGE_PATH", *restore).Send()
 	}
 
 	return ServerConfig{
@@ -124,11 +132,12 @@ func LoadAgentConfig(args []string) AgentConfig {
 	reportInterval := flagSet.Uint("r", defaultReportInterval, "report interval in seconds")
 
 	if err := flagSet.Parse(args); err != nil {
-		fmt.Printf("Error parsing flags: %v\n", err)
+		log.Error().Err(err).Msg("Error parsing flags")
 	}
 
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
 		socket.Set(val)
+		log.Info().Str("ADDRESS", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("POLL_INTERVAL"); ok {

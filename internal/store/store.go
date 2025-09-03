@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -87,7 +88,7 @@ func (st *Store) Restore() error {
 	if _, err = decoder.Token(); err != nil {
 		return err
 	}
-
+	locallog := log.Info()
 	for decoder.More() {
 		var metric model.Metrics
 		if err := decoder.Decode(&metric); err != nil {
@@ -96,8 +97,9 @@ func (st *Store) Restore() error {
 		if err := st.SetMetrics(metric.ID, &metric); err != nil {
 			return err
 		}
+		locallog.Str(metric.ID, "restored")
 	}
-
+	locallog.Send()
 	// array ending ']'
 	if _, err := decoder.Token(); err != nil {
 		return err
@@ -124,11 +126,12 @@ func (st *Store) Save(ctx context.Context) {
 		}
 
 		// Write to a temp file every time in different one.
-		tmpFile := st.storeFilePath + "*.tmp"
+		tmpFile := filepath.Base(st.storeFilePath) + "*.tmp"
 		file, err := os.CreateTemp(os.TempDir(), tmpFile)
 		if err != nil {
 			return err
 		}
+		defer file.Close()
 
 		encoder := json.NewEncoder(file)
 		encoder.SetIndent("", "  ")
@@ -144,7 +147,7 @@ func (st *Store) Save(ctx context.Context) {
 		}
 
 		// Replace a regular file with a temp one
-		return os.Rename(tmpFile, st.storeFilePath)
+		return os.Rename(file.Name(), st.storeFilePath)
 	}
 
 	defer func() {
@@ -177,7 +180,7 @@ func (st *Store) Save(ctx context.Context) {
 				return
 			case <-ticker.C:
 				if err := save(); err != nil {
-					log.Printf("Failed to save metrics: %v", err)
+					log.Error().Err(err).Msg("Failed to save metrics")
 				}
 			}
 		}

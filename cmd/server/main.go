@@ -41,7 +41,7 @@ func main() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		log.Printf("The server is starting at %s\n", server.Addr)
+		log.Printf("The server is starting at %s with config %#v \n", server.Addr, cfg)
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
