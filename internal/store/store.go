@@ -126,8 +126,9 @@ func (st *Store) Save(ctx context.Context) {
 		}
 
 		// Write to a temp file every time in different one.
-		tmpFile := filepath.Base(st.storeFilePath) + "*.tmp"
-		file, err := os.CreateTemp(os.TempDir(), tmpFile)
+		dir := filepath.Dir(st.storeFilePath) // use the same folder as the file
+		tmpFile := filepath.Base(st.storeFilePath) + ".*.tmp"
+		file, err := os.CreateTemp(dir, tmpFile)
 		if err != nil {
 			return err
 		}
