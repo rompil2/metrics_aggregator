@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"html/template"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rompil2/metrics_aggregator/internal/config"
+
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository"
 	"github.com/rompil2/metrics_aggregator/internal/service"
@@ -18,20 +20,48 @@ import (
 )
 
 func main() {
+	var pingHandler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
+	var repo service.Repo
 	cfg := config.LoadServerConfig(os.Args[1:])
+	if cfg.DBConnStr == "" {
 
-	repository, err := repository.NewMemStorage()
-	if err != nil {
-		log.Fatal(err)
-	}
-	store, err := store.NewStore(repository, cfg.StoreConfig)
-	if err != nil {
-		log.Fatal(err)
-	}
+		memRepo, err := repository.NewMemStorage()
+		if err != nil {
+			log.Fatal(err)
+		}
+		repo = memRepo
+		if cfg.FileStoragePath != "" {
+			repo, err = store.NewStore(repo, cfg.StoreConfig)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	} else {
 
-	srvc := service.NewMetricService(store)
+		db, err := sql.Open("pgx", cfg.DBConnStr)
+		if err != nil {
+			panic(err)
+		}
+		defer db.Close()
+
+		pingHandler = func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			if err = db.PingContext(ctx); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+
+		}
+	}
+	srvc := service.NewMetricService(repo)
 
 	handler := handler.NewHandlerMux(&srvc, template.Must(template.ParseFiles("templates/index.html")))
+
+	handler.Get("/ping", http.HandlerFunc(pingHandler))
 
 	server := &http.Server{
 		Addr:    cfg.String(),

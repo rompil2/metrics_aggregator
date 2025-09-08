@@ -57,6 +57,7 @@ type StoreConfig struct {
 	StoreInterval   time.Duration
 	FileStoragePath string
 	Restore         bool
+	DBConnStr       string
 }
 
 type ServerConfig struct {
@@ -76,6 +77,7 @@ func LoadServerConfig(args []string) ServerConfig {
 	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
 	fileStoragePath := flagSet.String("f", defaultFileStoragePath, "path to a file to store data")
 	restore := flagSet.Bool("r", defaultRestore, "should restore data")
+	database := flagSet.String("d", "", "A DB connection string")
 
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
@@ -103,12 +105,18 @@ func LoadServerConfig(args []string) ServerConfig {
 		log.Info().Bool("FILE_STORAGE_PATH", *restore).Send()
 	}
 
+	if val, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		*database = strings.ToLower(val)
+		log.Info().Str("DATABASE_DSN", *database).Send()
+	}
+
 	return ServerConfig{
 		SocketConfig: *socket,
 		StoreConfig: StoreConfig{
 			StoreInterval:   time.Duration(*storeInterval) * time.Second,
 			FileStoragePath: *fileStoragePath,
 			Restore:         *restore,
+			DBConnStr:       *database,
 		},
 	}
 }
