@@ -11,8 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rompil2/metrics_aggregator/internal/config"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/rompil2/metrics_aggregator/internal/config"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository"
 	"github.com/rompil2/metrics_aggregator/internal/service"
