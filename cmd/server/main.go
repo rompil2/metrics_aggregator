@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"html/template"
 	"log"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/rompil2/metrics_aggregator/internal/config"
+	"github.com/rompil2/metrics_aggregator/internal/dbstore"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository"
 	"github.com/rompil2/metrics_aggregator/internal/service"
@@ -21,14 +21,17 @@ import (
 )
 
 func main() {
-	var pingHandler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
+	var (
+		pingHandler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 
-	var repo service.Repo
+		repo service.Repo
+	)
 	cfg := config.LoadServerConfig(os.Args[1:])
-	if cfg.DBConnStr == "" {
 
+	if cfg.DBConnStr == "" {
+		// Connecition string is not set
 		memRepo, err := repository.NewMemStorage()
 		if err != nil {
 			log.Fatal(err)
@@ -40,23 +43,22 @@ func main() {
 				log.Fatal(err)
 			}
 		}
+
 	} else {
-
-		db, err := sql.Open("pgx", cfg.DBConnStr)
+		// There is some connection string
+		dbRepo, err := dbstore.NewDBStore(cfg.DBConnStr)
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
-		defer db.Close()
-
 		pingHandler = func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			if err = db.PingContext(ctx); err != nil {
+			if err = dbRepo.Ping(); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
 
 		}
+		repo = dbRepo
 	}
 	srvc := service.NewMetricService(repo)
 
