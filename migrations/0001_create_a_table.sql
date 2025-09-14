@@ -21,6 +21,5 @@ CREATE INDEX idx_metrics_hash ON metrics(hash);
 DROP INDEX IF EXISTS idx_metrics_hash;
 DROP INDEX IF EXISTS idx_metrics_type;
 DROP INDEX IF EXISTS idx_metrics_id;
-
 DROP TABLE IF EXISTS metrics;
 -- +goose StatementEnd

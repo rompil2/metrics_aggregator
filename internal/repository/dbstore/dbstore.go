@@ -18,6 +18,11 @@ type DBStore struct {
 	db *sql.DB
 }
 
+// SetAllMetrics implements service.Repo.
+func (s DBStore) SetAllMetrics([]model.Metrics) error {
+	panic("unimplemented")
+}
+
 func NewDBStore(connStr string) (DBStore, error) {
 	if db != nil {
 		return DBStore{db}, nil
@@ -42,9 +47,7 @@ func (s DBStore) Ping() error {
 	return s.db.Ping()
 }
 
-func (s DBStore) SetMetrics(ID string, value any) error {
-	// Определяем тип метрики и соответствующее значение
-	metric := value.(*model.Metrics)
+func (s DBStore) SetMetrics(ID string, metric model.Metrics) error {
 	if metric.MType == "counter" && metric.Delta != nil {
 		query := `
 			INSERT INTO metrics (id, m_type, delta, value, hash)
@@ -74,7 +77,7 @@ func (s DBStore) SetMetrics(ID string, value any) error {
 	return errors.New("invalid metric data")
 }
 
-func (s DBStore) GetMetrics(metricID string) (any, error) {
+func (s DBStore) GetMetrics(metricID string) (model.Metrics, error) {
 	var metric model.Metrics
 	var delta sql.NullInt64
 	var value sql.NullFloat64
@@ -104,11 +107,11 @@ func (s DBStore) GetMetrics(metricID string) (any, error) {
 		metric.Value = &value.Float64
 	}
 
-	return any(&metric), nil
+	return metric, nil
 }
 
-func (s DBStore) AllMetrics() ([]any, error) {
-	query := `SELECT id, m_type, delta, value, hash, created_at FROM metrics ORDER BY created_at DESC`
+func (s DBStore) GetAllMetrics() ([]model.Metrics, error) {
+	query := `SELECT id, m_type, delta, value, hash, updated_at FROM metrics ORDER BY updated_at DESC`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -116,7 +119,7 @@ func (s DBStore) AllMetrics() ([]any, error) {
 	}
 	defer rows.Close()
 
-	var metrics []any
+	var metrics []model.Metrics
 
 	for rows.Next() {
 		var metric model.Metrics

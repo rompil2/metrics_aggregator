@@ -20,7 +20,9 @@ import (
 type Service interface {
 	UpdateMetrics(metric *model.Metrics) error
 	GetMetrics(ID string) (model.Metrics, error)
-	AllMetrics() ([]model.Metrics, error)
+	UpdateAllMetrics(ms []model.Metrics) error
+	GetAllMetrics() ([]model.Metrics, error)
+	Ping() error
 }
 
 type HandlerMux struct {
@@ -46,7 +48,9 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Use(middleware.Recoverer)
 
 	h.Get("/", h.HomePage)
+	h.Get("/ping", h.Ping)
 	h.Post("/update/", h.UpdateWithJSON)
+	h.Post("/updates/", h.UpdatesWithJSON)
 	h.Post("/update/{mtype}/{id}/{value}", h.UpdateMetrics)
 	h.Post("/value/", h.GetMetricsJSON)
 	h.Get("/value/{mtype}/{id}", h.GetMetrics)
@@ -55,7 +59,7 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 }
 
 func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
-	metrics, err := h.Service.AllMetrics()
+	metrics, err := h.Service.GetAllMetrics()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -144,6 +148,37 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (h *HandlerMux) UpdatesWithJSON(w http.ResponseWriter, r *http.Request) {
+	log := logger.FromContext(r.Context())
+	log.Debug().Msg("Process updating a metrics")
+
+	var metricsModels []model.Metrics
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	if err := decoder.Decode(&metricsModels); err != nil {
+		log.Error().Err(err).Msg("cannot parse the request")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Validate MetricModel
+	for _, metricsModel := range metricsModels {
+		if err := validateMetricsUpdate(&metricsModel); err != nil {
+			log.Error().Err(err).Msg("validation failed")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	err := h.Service.UpdateAllMetrics(metricsModels)
+	if err != nil {
+		h.handleUpdateError(w, err, "All metrics", log)
+		return
+	}
+
+	log.Debug().Msg("all metrics are updated")
+	w.WriteHeader(http.StatusOK)
+}
+
 func (h *HandlerMux) handleUpdateError(w http.ResponseWriter, err error, id string, log zerolog.Logger) {
 	if errors.Is(err, service.ErrMetricCreated) {
 		log.Info().Str("id", id).Msg("metric created")
@@ -198,6 +233,13 @@ func (h *HandlerMux) GetMetricsJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Info().Msg("the metrics is returned back")
+}
+
+func (h *HandlerMux) Ping(w http.ResponseWriter, r *http.Request) {
+	if err := h.Service.Ping(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func BuildMetrics(mType string, id string, val string) (model.Metrics, error) {

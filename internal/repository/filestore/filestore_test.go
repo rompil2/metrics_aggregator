@@ -1,4 +1,4 @@
-package store
+package filestore
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewStore(t *testing.T) {
+func TestNewFileStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -46,9 +46,9 @@ func TestNewStore(t *testing.T) {
 		// Expect SetMetrics calls for each metric during restore
 		mockRepo.EXPECT().SetMetrics("test1", gomock.Any()).Return(nil)
 		mockRepo.EXPECT().SetMetrics("test2", gomock.Any()).Return(nil)
-		mockRepo.EXPECT().AllMetrics().Return([]any{}, nil).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 		assert.NotNil(t, store)
 
@@ -63,9 +63,9 @@ func TestNewStore(t *testing.T) {
 			Restore:         false,
 		}
 
-		mockRepo.EXPECT().AllMetrics().Return([]any{}, nil).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 		assert.NotNil(t, store)
 
@@ -86,12 +86,12 @@ func TestStore_SetMetrics(t *testing.T) {
 		}
 
 		mockRepo.EXPECT().SetMetrics("test", gomock.Any()).Return(nil)
-		mockRepo.EXPECT().AllMetrics().Return([]any{}, nil).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
-		err = store.SetMetrics("test", &model.Metrics{ID: "test"})
+		err = store.SetMetrics("test", model.Metrics{ID: "test"})
 		require.NoError(t, err)
 
 		// Give some time for the goroutine to process
@@ -178,15 +178,15 @@ func TestStore_Save(t *testing.T) {
 			Restore:         false,
 		}
 
-		testMetrics := []any{
-			&model.Metrics{ID: "test1", MType: "gauge", Value: &v},
-			&model.Metrics{ID: "test2", MType: "counter", Delta: &d},
+		testMetrics := []model.Metrics{
+			model.Metrics{ID: "test1", MType: "gauge", Value: &v},
+			model.Metrics{ID: "test2", MType: "counter", Delta: &d},
 		}
 
-		mockRepo.EXPECT().AllMetrics().Return(testMetrics, nil)
-		mockRepo.EXPECT().AllMetrics().Return(testMetrics, nil).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil)
+		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
 		// Trigger save via sync channel
@@ -213,10 +213,10 @@ func TestStore_Save(t *testing.T) {
 			Restore:         false,
 		}
 
-		testMetrics := []any{&model.Metrics{ID: "test", MType: "gauge", Value: &v}}
-		mockRepo.EXPECT().AllMetrics().Return(testMetrics, nil).AnyTimes()
+		testMetrics := []model.Metrics{model.Metrics{ID: "test", MType: "gauge", Value: &v}}
+		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
 		// Wait for at least one interval
@@ -240,10 +240,10 @@ func TestStore_Save(t *testing.T) {
 			Restore:         false,
 		}
 		v := float64(1.0)
-		testMetrics := []any{&model.Metrics{ID: "test", MType: "gauge", Value: &v}}
-		mockRepo.EXPECT().AllMetrics().Return(testMetrics, nil).AnyTimes()
+		testMetrics := []model.Metrics{model.Metrics{ID: "test", MType: "gauge", Value: &v}}
+		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
 		// Trigger save
@@ -268,9 +268,9 @@ func TestStore_Close(t *testing.T) {
 			Restore:         false,
 		}
 
-		mockRepo.EXPECT().AllMetrics().Return([]any{}, nil).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
 		// Store should be running
@@ -304,12 +304,12 @@ func TestStore_EdgeCases(t *testing.T) {
 
 		expectedErr := errors.New("repo error")
 		mockRepo.EXPECT().SetMetrics("test", gomock.Any()).Return(expectedErr)
-		mockRepo.EXPECT().AllMetrics().Return([]any{}, nil).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
-		err = store.SetMetrics("test", &model.Metrics{ID: "test"})
+		err = store.SetMetrics("test", model.Metrics{ID: "test"})
 		require.Error(t, err)
 		require.Equal(t, expectedErr, err)
 
@@ -325,9 +325,9 @@ func TestStore_EdgeCases(t *testing.T) {
 		}
 
 		expectedErr := errors.New("all metrics error")
-		mockRepo.EXPECT().AllMetrics().Return([]any{}, expectedErr).AnyTimes()
+		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, expectedErr).AnyTimes()
 
-		store, err := NewStore(mockRepo, cfg)
+		store, err := NewFileStore(mockRepo, cfg)
 		require.NoError(t, err)
 
 		// Trigger save which should fail

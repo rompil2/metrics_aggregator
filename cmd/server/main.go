@@ -13,58 +13,46 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/rompil2/metrics_aggregator/internal/config"
-	"github.com/rompil2/metrics_aggregator/internal/dbstore"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
-	"github.com/rompil2/metrics_aggregator/internal/repository"
+	"github.com/rompil2/metrics_aggregator/internal/repository/dbstore"
+	"github.com/rompil2/metrics_aggregator/internal/repository/filestore"
+	"github.com/rompil2/metrics_aggregator/internal/repository/memstore"
 	"github.com/rompil2/metrics_aggregator/internal/service"
-	"github.com/rompil2/metrics_aggregator/internal/store"
 )
 
 func main() {
 	var (
-		pingHandler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-
 		repo service.Repo
 	)
 	cfg := config.LoadServerConfig(os.Args[1:])
 
 	if cfg.DBConnStr == "" {
 		// Connecition string is not set
-		memRepo, err := repository.NewMemStorage()
-		if err != nil {
-			log.Fatal(err)
-		}
+		memRepo := memstore.NewMemStore()
+
 		repo = memRepo
 		if cfg.FileStoragePath != "" {
-			repo, err = store.NewStore(repo, cfg.StoreConfig)
+			filerepo, err := filestore.NewFileStore(repo, cfg.StoreConfig)
 			if err != nil {
 				log.Fatal(err)
 			}
-		}
+			repo = filerepo
 
+		}
 	} else {
 		// There is some connection string
 		dbRepo, err := dbstore.NewDBStore(cfg.DBConnStr)
 		if err != nil {
 			log.Fatal(err)
 		}
-		pingHandler = func(w http.ResponseWriter, r *http.Request) {
-			if err = dbRepo.Ping(); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
+		defer dbRepo.Close()
 
-		}
 		repo = dbRepo
 	}
+
 	srvc := service.NewMetricService(repo)
 
-	handler := handler.NewHandlerMux(&srvc, template.Must(template.ParseFiles("templates/index.html")))
-
-	handler.Get("/ping", http.HandlerFunc(pingHandler))
+	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles("templates/index.html")))
 
 	server := &http.Server{
 		Addr:    cfg.String(),
