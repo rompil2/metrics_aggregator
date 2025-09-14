@@ -319,7 +319,7 @@ func TestMemStorage_Ping(t *testing.T) {
 		mm := NewMemStore()
 		err := mm.Ping()
 		assert.Error(t, err)
-		assert.Equal(t, "Not implemented", err.Error())
+		assert.Equal(t, "not implemented yet", err.Error())
 	})
 }
 
