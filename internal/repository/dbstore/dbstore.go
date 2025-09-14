@@ -18,11 +18,6 @@ type DBStore struct {
 	db *sql.DB
 }
 
-// SetAllMetrics implements service.Repo.
-func (s DBStore) SetAllMetrics([]model.Metrics) error {
-	panic("unimplemented")
-}
-
 func NewDBStore(connStr string) (DBStore, error) {
 	if db != nil {
 		return DBStore{db}, nil
@@ -41,6 +36,83 @@ func NewDBStore(connStr string) (DBStore, error) {
 		return DBStore{}, err
 	}
 	return dbs, nil
+}
+
+// SetAllMetrics updates multiple metrics in a single transaction with batch processing
+func (s DBStore) SetAllMetrics(metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil // Nothing to update
+	}
+
+	// Start transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
+		}
+	}()
+
+	// Prepare statements for counter and gauge updates
+	counterStmt, err := tx.Prepare(`
+		INSERT INTO metrics (id, m_type, delta, value, hash)
+		VALUES ($1, $2, $3, NULL, $4)
+		ON CONFLICT (id) 
+		DO UPDATE SET 
+			delta = metrics.delta + EXCLUDED.delta,
+			hash = EXCLUDED.hash,
+			updated_at = CURRENT_TIMESTAMP
+	`)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer counterStmt.Close()
+
+	gaugeStmt, err := tx.Prepare(`
+		INSERT INTO metrics (id, m_type, delta, value, hash)
+		VALUES ($1, $2, NULL, $3, $4)
+		ON CONFLICT (id) 
+		DO UPDATE SET 
+			value = EXCLUDED.value,
+			hash = EXCLUDED.hash,
+			updated_at = CURRENT_TIMESTAMP
+	`)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer gaugeStmt.Close()
+
+	// Process each metric in the batch
+	for _, metric := range metrics {
+		if metric.MType == model.Counter && metric.Delta != nil {
+			_, err := counterStmt.Exec(metric.ID, metric.MType, *metric.Delta, metric.Hash)
+			if err != nil {
+				tx.Rollback()
+				return err
+			}
+		} else if metric.MType == model.Gauge && metric.Value != nil {
+			_, err := gaugeStmt.Exec(metric.ID, metric.MType, *metric.Value, metric.Hash)
+			if err != nil {
+				tx.Rollback()
+				return err
+			}
+		} else {
+			tx.Rollback()
+			return errors.New("invalid metric data in batch: ID=" + metric.ID)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s DBStore) Ping() error {
