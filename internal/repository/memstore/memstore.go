@@ -87,5 +87,5 @@ func (mem *MemStorage) SetAllMetrics(metrics []model.Metrics) error {
 // Ping проверяет доступность хранилища
 func (mem *MemStorage) Ping() error {
 	// Для in-memory хранилища всегда доступно
-	return errors.New("Not implemented")
+	return errors.New("not implemented yet")
 }
