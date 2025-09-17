@@ -280,7 +280,7 @@ func (h *HTTPClient) isRetriableError(err error) bool {
 	// Network errors, timeouts, and temporary errors are retriable
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		return netErr.Timeout() || netErr.Temporary()
+		return netErr.Timeout()
 	}
 
 	// DNS errors are retriable
