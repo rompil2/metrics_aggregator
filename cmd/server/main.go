@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"html/template"
 	"log"
 	"net/http"
@@ -41,7 +42,11 @@ func main() {
 		}
 	} else {
 		// There is some connection string
-		dbRepo, err := dbstore.NewDBStore(cfg.DBConnStr)
+		db, err := sql.Open("pgx", cfg.DBConnStr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		dbRepo, err := dbstore.NewDBStore(db)
 		if err != nil {
 			log.Fatal(err)
 		}

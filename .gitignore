@@ -10,6 +10,7 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+*.json
 
 # Binaries
 cmd/agent/main
@@ -25,3 +26,4 @@ vendor/
 .vscode
 
 pgdata
+internal/repository/dbstore/dbstore.go.old
