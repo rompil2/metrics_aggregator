@@ -2,10 +2,13 @@ package dbstore
 
 import (
 	"database/sql"
-
 	"errors"
+	"fmt"
 	"log"
+	"time"
 
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgerrcode"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/rompil2/metrics_aggregator/internal/model"
@@ -36,12 +39,27 @@ const (
 	allMetricsSQL = `SELECT id, m_type, delta, value, hash, updated_at FROM metrics ORDER BY updated_at DESC`
 )
 
+// retriableErrorCodes contains PostgreSQL error codes that should trigger retries
+var retriableErrorCodes = map[string]bool{
+	pgerrcode.ConnectionException:                     true,
+	pgerrcode.ConnectionDoesNotExist:                  true,
+	pgerrcode.ConnectionFailure:                       true,
+	pgerrcode.TransactionRollback:                     true,
+	pgerrcode.SerializationFailure:                    true,
+	pgerrcode.DeadlockDetected:                        true,
+	pgerrcode.CannotConnectNow:                        true,
+	pgerrcode.AdminShutdown:                           true,
+	pgerrcode.CrashShutdown:                           true,
+	pgerrcode.TooManyConnections:                      true,
+	pgerrcode.InvalidAuthorizationSpecification:       true,
+	pgerrcode.SQLClientUnableToEstablishSQLConnection: true,
+}
+
 type DBStore struct {
 	db *sql.DB
 }
 
 func NewDBStore(db *sql.DB) (DBStore, error) {
-
 	dbs := DBStore{db}
 	// Check connection
 	if err := dbs.Ping(); err != nil {
@@ -55,82 +73,96 @@ func NewDBStore(db *sql.DB) (DBStore, error) {
 
 // SetAllMetrics updates multiple metrics in a single transaction with batch processing
 func (s DBStore) SetAllMetrics(metrics []model.Metrics) error {
-	if len(metrics) == 0 {
-		return nil // Nothing to update
-	}
-
-	// Start transaction
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			tx.Rollback()
-			panic(p)
+	return s.withRetry(func() error {
+		if len(metrics) == 0 {
+			return nil // Nothing to update
 		}
-	}()
 
-	// Prepare statements for counter and gauge updates
-	counterStmt, err := tx.Prepare(updateCounterSQL)
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	defer counterStmt.Close()
-
-	gaugeStmt, err := tx.Prepare(updateGaugeSQL)
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	defer gaugeStmt.Close()
-
-	// Process each metric in the batch
-	for _, metric := range metrics {
-		if metric.MType == model.Counter && metric.Delta != nil {
-			_, err := counterStmt.Exec(metric.ID, metric.MType, *metric.Delta, metric.Hash)
-			if err != nil {
-				tx.Rollback()
-				return err
-			}
-		} else if metric.MType == model.Gauge && metric.Value != nil {
-			_, err := gaugeStmt.Exec(metric.ID, metric.MType, *metric.Value, metric.Hash)
-			if err != nil {
-				tx.Rollback()
-				return err
-			}
-		} else {
-			tx.Rollback()
-			return errors.New("invalid metric data in batch: ID=" + metric.ID)
+		// Start transaction
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
 		}
-	}
+		defer func() {
+			if p := recover(); p != nil {
+				tx.Rollback()
+				panic(p)
+			}
+		}()
 
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return err
-	}
+		// Prepare statements for counter and gauge updates
+		counterStmt, err := tx.Prepare(updateCounterSQL)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		defer counterStmt.Close()
 
-	return nil
+		gaugeStmt, err := tx.Prepare(updateGaugeSQL)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		defer gaugeStmt.Close()
+
+		// Process each metric in the batch
+		for _, metric := range metrics {
+			if metric.MType == model.Counter && metric.Delta != nil {
+				_, err := counterStmt.Exec(metric.ID, metric.MType, *metric.Delta, metric.Hash)
+				if err != nil {
+					tx.Rollback()
+					return err
+				}
+			} else if metric.MType == model.Gauge && metric.Value != nil {
+				_, err := gaugeStmt.Exec(metric.ID, metric.MType, *metric.Value, metric.Hash)
+				if err != nil {
+					tx.Rollback()
+					return err
+				}
+			} else {
+				tx.Rollback()
+				return errors.New("invalid metric data in batch: ID=" + metric.ID)
+			}
+		}
+
+		// Commit transaction
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 func (s DBStore) Ping() error {
-	return s.db.Ping()
+	return s.withRetry(s.db.Ping)
 }
 
 func (s DBStore) SetMetrics(ID string, metric model.Metrics) error {
-	if metric.MType == "counter" && metric.Delta != nil {
-		_, err := s.db.Exec(updateCounterSQL, ID, metric.MType, *metric.Delta, metric.Hash)
-		return err
-	} else if metric.MType == "gauge" && metric.Value != nil {
-		_, err := s.db.Exec(updateGaugeSQL, ID, metric.MType, *metric.Value, metric.Hash)
-		return err
-	}
+	return s.withRetry(func() error {
+		if metric.MType == "counter" && metric.Delta != nil {
+			_, err := s.db.Exec(updateCounterSQL, ID, metric.MType, *metric.Delta, metric.Hash)
+			return err
+		} else if metric.MType == "gauge" && metric.Value != nil {
+			_, err := s.db.Exec(updateGaugeSQL, ID, metric.MType, *metric.Value, metric.Hash)
+			return err
+		}
 
-	return errors.New("invalid metric data")
+		return errors.New("invalid metric data")
+	})
 }
 
 func (s DBStore) GetMetrics(metricID string) (model.Metrics, error) {
+	var result model.Metrics
+	err := s.withRetry(func() error {
+		var innerErr error
+		result, innerErr = s.getMetricsInternal(metricID)
+		return innerErr
+	})
+	return result, err
+}
+
+func (s DBStore) getMetricsInternal(metricID string) (model.Metrics, error) {
 	var metric model.Metrics
 	var delta sql.NullInt64
 	var value sql.NullFloat64
@@ -164,7 +196,16 @@ func (s DBStore) GetMetrics(metricID string) (model.Metrics, error) {
 }
 
 func (s DBStore) GetAllMetrics() ([]model.Metrics, error) {
+	var result []model.Metrics
+	err := s.withRetry(func() error {
+		var innerErr error
+		result, innerErr = s.getAllMetricsInternal()
+		return innerErr
+	})
+	return result, err
+}
 
+func (s DBStore) getAllMetricsInternal() ([]model.Metrics, error) {
 	rows, err := s.db.Query(allMetricsSQL)
 	if err != nil {
 		return nil, err
@@ -206,6 +247,65 @@ func (s DBStore) GetAllMetrics() ([]model.Metrics, error) {
 	}
 
 	return metrics, nil
+}
+
+// Error retry wrapper
+func (s DBStore) withRetry(operation func() error) error {
+	const maxAttempts = 3
+	retryDelays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+
+	var lastErr error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := operation()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		if !s.isRetriableError(err) {
+			return err
+		}
+
+		if attempt < maxAttempts-1 {
+			log.Printf("Database operation failed (attempt %d/%d), retrying in %v: %v",
+				attempt+1, maxAttempts, retryDelays[attempt], err)
+
+			time.Sleep(retryDelays[attempt])
+		}
+	}
+
+	return fmt.Errorf("all %d attempts failed, last error: %w", maxAttempts, lastErr)
+}
+
+func (s DBStore) isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// PostgreSQL error check
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return retriableErrorCodes[pgErr.Code]
+	}
+
+	// Network/timeout errors are retriable
+	var netErr interface {
+		Timeout() bool
+		Temporary() bool
+	}
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+
+	// Connection errors are retriable
+	if errors.Is(err, sql.ErrConnDone) {
+		return true
+	}
+
+	// Non-retriable by default
+	return false
 }
 
 func (s DBStore) Migrate() error {
