@@ -5,10 +5,14 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"maps"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -214,26 +218,92 @@ func (h *HTTPClient) compressData(data []byte) (*bytes.Buffer, error) {
 }
 
 func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Buffer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+	const maxAttempts = 3
+	retryDelays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+
+	var lastErr error
+
+	for attempt := range maxAttempts {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+		if err != nil {
+			return fmt.Errorf("creating request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Accept-Encoding", "gzip")
+
+		resp, err := h.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("sending request: %w", err)
+
+			// Check if error is retriable
+			if !h.isRetriableError(err) || attempt == maxAttempts-1 {
+				return lastErr
+			}
+
+			// Wait before retrying
+			select {
+			case <-time.After(retryDelays[attempt]):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= http.StatusBadRequest {
+			lastErr = fmt.Errorf("server returned status: %d %s", resp.StatusCode, resp.Status)
+
+			// Check if status code is retriable (5xx errors are usually retriable)
+			if !h.isRetriableStatusCode(resp.StatusCode) || attempt == maxAttempts-1 {
+				return lastErr
+			}
+
+			// Wait before retrying
+			select {
+			case <-time.After(retryDelays[attempt]):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		return nil
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("Accept-Encoding", "gzip")
+	return fmt.Errorf("all %d attempts failed, last error: %w", maxAttempts, lastErr)
+}
 
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("server returned status: %d %s", resp.StatusCode, resp.Status)
+// isRetriableError checks if an error is retriable
+func (h *HTTPClient) isRetriableError(err error) bool {
+	// Network errors, timeouts, and temporary errors are retriable
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout() || netErr.Temporary()
 	}
 
-	return nil
+	// DNS errors are retriable
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	// Connection errors are retriable
+	if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "connection") {
+		return true
+	}
+
+	return false
+}
+
+// isRetriableStatusCode checks if an HTTP status code is retriable
+func (h *HTTPClient) isRetriableStatusCode(statusCode int) bool {
+	// 5xx errors are server errors and usually retriable
+	// 429 (Too Many Requests) and 408 (Request Timeout) are also retriable
+	return statusCode >= 500 && statusCode < 600 ||
+		statusCode == http.StatusTooManyRequests ||
+		statusCode == http.StatusRequestTimeout
 }
 
 func (h *HTTPClient) appendError(mu *sync.Mutex, errs *[]error, err error) {
