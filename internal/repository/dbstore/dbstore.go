@@ -40,15 +40,8 @@ type DBStore struct {
 	db *sql.DB
 }
 
-func NewDBStore(connStr string) (DBStore, error) {
-	if db != nil {
-		return DBStore{db}, nil
-	}
+func NewDBStore(db *sql.DB) (DBStore, error) {
 
-	db, err := sql.Open("pgx", connStr)
-	if err != nil {
-		return DBStore{}, err
-	}
 	dbs := DBStore{db}
 	// Check connection
 	if err := dbs.Ping(); err != nil {
