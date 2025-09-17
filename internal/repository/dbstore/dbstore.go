@@ -17,7 +17,10 @@ import (
 
 var db *sql.DB
 
+var retryDelays = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+
 const (
+	maxAttempts      = 3
 	updateCounterSQL = `
 			INSERT INTO metrics (id, m_type, delta, value, hash)
 			VALUES ($1, $2, $3, NULL, $4)
@@ -251,12 +254,10 @@ func (s DBStore) getAllMetricsInternal() ([]model.Metrics, error) {
 
 // Error retry wrapper
 func (s DBStore) withRetry(operation func() error) error {
-	const maxAttempts = 3
-	retryDelays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 
 	var lastErr error
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		err := operation()
 		if err == nil {
 			return nil
