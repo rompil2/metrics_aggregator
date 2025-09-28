@@ -60,7 +60,7 @@ func main() {
 	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles("templates/index.html")))
 
 	server := &http.Server{
-		Addr:    cfg.String(),
+		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,
 	}
 
