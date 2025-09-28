@@ -25,7 +25,7 @@ func main() {
 
 	// Настройка агента
 	collector := agent.NewCollector(cfg.PollInterval)
-	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.Host, cfg.Port, true)
+	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.Host, cfg.Port, true, cfg.HashConfig.String())
 	agent := agent.New(collector, client)
 
 	// Запуск агента

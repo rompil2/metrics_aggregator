@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log"
 	"maps"
@@ -34,9 +37,15 @@ type HTTPClient struct {
 	socket         string
 	client         *http.Client
 	batchEnabled   bool
+	hasher         *hash.Hash
 }
 
-func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool) *HTTPClient {
+func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string) *HTTPClient {
+	var h *hash.Hash
+	if hashKey != "" {
+		key := []byte(hashKey)
+		*h = hmac.New(sha256.New, key)
+	}
 	return &HTTPClient{
 		reportInterval: reportInterval,
 		socket:         fmt.Sprintf("http://%s:%v", host, port),
@@ -44,6 +53,7 @@ func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEn
 			Timeout: 30 * time.Second, // Добавляем таймаут
 		},
 		batchEnabled: batchEnabled,
+		hasher:       h,
 	}
 }
 
@@ -132,6 +142,15 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 				h.appendError(&mu, &errs, err)
 				return
 			}
+			var hashString *string
+			if h.hasher != nil {
+				(*h.hasher).Reset()
+				if _, err := (*h.hasher).Write(buf); err != nil {
+					h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
+					return
+				}
+				*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
+			}
 
 			// Создаем сжатые данные
 			compressedData, err := h.compressData(buf)
@@ -142,7 +161,7 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 
 			// Отправляем запрос
 			url := h.socket + updatePath
-			err = h.sendRequest(ctx, url, compressedData)
+			err = h.sendRequest(ctx, url, compressedData, hashString)
 			if err != nil {
 				h.appendError(&mu, &errs, fmt.Errorf("sending metric %s: %w", key, err))
 			}
@@ -170,6 +189,14 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 	if err != nil {
 		return fmt.Errorf("marshaling metrics batch: %w", err)
 	}
+	var hashString *string
+	if h.hasher != nil {
+		(*h.hasher).Reset()
+		if _, err := (*h.hasher).Write(jsonData); err != nil {
+			return fmt.Errorf("hashing data: %w", err)
+		}
+		*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
+	}
 
 	// Сжимаем данные
 	compressedData, err := h.compressData(jsonData)
@@ -179,7 +206,7 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 
 	// Отправляем запрос
 	url := h.socket + batchUpdatePath // Используем отдельный endpoint для batch
-	return h.sendRequest(ctx, url, compressedData)
+	return h.sendRequest(ctx, url, compressedData, hashString)
 }
 
 // Вспомогательные методы
@@ -217,7 +244,7 @@ func (h *HTTPClient) compressData(data []byte) (*bytes.Buffer, error) {
 	return &zbuf, nil
 }
 
-func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Buffer) error {
+func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Buffer, hash *string) error {
 	const maxAttempts = 3
 	retryDelays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 
@@ -232,6 +259,9 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Set("Accept-Encoding", "gzip")
+		if hash != nil {
+			req.Header.Set("HashSHA256", *hash)
+		}
 
 		resp, err := h.client.Do(req)
 		if err != nil {
