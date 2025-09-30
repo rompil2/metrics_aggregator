@@ -156,6 +156,35 @@ func TestHTTPClient_Run_MetricsProcessing_Batch(t *testing.T) {
 	wg.Wait()
 }
 
+func TestHTTPClient_sendMetrics_withHash(t *testing.T) {
+	t.Parallel()
+
+	// Создаем тестовый сервер
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/update/", r.URL.Path)
+		assert.NotEqual(t, "", r.Header.Get("HashSHA256"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "secret")
+	// Подменяем адрес сервера на тестовый
+	client.socket = server.URL
+
+	metrics := map[string]interface{}{
+		"counter1": int64(42),
+		"gauge1":   3.14,
+	}
+
+	err := client.SendMetrics(context.Background(), metrics)
+	assert.NoError(t, err)
+	// Должно быть 2 запроса (по одному на каждую метрику)
+	assert.Equal(t, 2, requestCount)
+}
+
 func TestHTTPClient_SendMetrics_Success(t *testing.T) {
 	t.Parallel()
 

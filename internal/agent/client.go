@@ -41,10 +41,18 @@ type HTTPClient struct {
 }
 
 func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string) *HTTPClient {
-	var h *hash.Hash
 	if hashKey != "" {
 		key := []byte(hashKey)
-		*h = hmac.New(sha256.New, key)
+		hash := hmac.New(sha256.New, key)
+		return &HTTPClient{
+			reportInterval: reportInterval,
+			socket:         fmt.Sprintf("http://%s:%v", host, port),
+			client: &http.Client{
+				Timeout: 30 * time.Second, // Добавляем таймаут
+			},
+			batchEnabled: batchEnabled,
+			hasher:       &hash,
+		}
 	}
 	return &HTTPClient{
 		reportInterval: reportInterval,
@@ -53,7 +61,7 @@ func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEn
 			Timeout: 30 * time.Second, // Добавляем таймаут
 		},
 		batchEnabled: batchEnabled,
-		hasher:       h,
+		hasher:       nil,
 	}
 }
 
@@ -142,7 +150,7 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 				h.appendError(&mu, &errs, err)
 				return
 			}
-			var hashString *string
+			hashString := new(string)
 			if h.hasher != nil {
 				(*h.hasher).Reset()
 				if _, err := (*h.hasher).Write(buf); err != nil {
@@ -189,7 +197,7 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 	if err != nil {
 		return fmt.Errorf("marshaling metrics batch: %w", err)
 	}
-	var hashString *string
+	hashString := new(string)
 	if h.hasher != nil {
 		(*h.hasher).Reset()
 		if _, err := (*h.hasher).Write(jsonData); err != nil {
