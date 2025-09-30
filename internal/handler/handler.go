@@ -31,7 +31,7 @@ type HandlerMux struct {
 	tmpl    *template.Template
 }
 
-func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
+func NewHandlerMux(service Service, tmpl *template.Template, key string) *HandlerMux {
 
 	h := &HandlerMux{
 		Service: service,
@@ -44,6 +44,10 @@ func NewHandlerMux(service Service, tmpl *template.Template) *HandlerMux {
 	h.Use(MiddlewareRequestUnzip)
 	h.Use(MiddlewareResponseZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
+	if key != "" {
+		h.Use(MiddlewareCheckHash(key))
+		h.Use(MiddlewareSetHash(key))
+	}
 	h.Use(NaiveLoggerMiddleware)
 	h.Use(middleware.Recoverer)
 

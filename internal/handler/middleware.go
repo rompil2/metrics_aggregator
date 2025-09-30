@@ -3,6 +3,10 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -94,13 +98,73 @@ func MiddlewareRequestUnzip(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+func MiddlewareCheckHash(key string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if hash := r.Header.Get("HashSHA256"); hash != "" {
+				// Hash  was provided
+				data := []byte{}
+				if _, err := r.Body.Read(data); err != nil {
+					if err != io.EOF {
+						// Incorrect body
+						http.Error(w, "Error reading request body", http.StatusInternalServerError)
+						return
+					}
+				}
+				// Get another hash on a server side
+				h := hmac.New(sha256.New, []byte(key))
+				if _, err := h.Write(data); err != nil {
+					http.Error(w, "Error computing hash", http.StatusInternalServerError)
+					return
+				}
+
+				// Compare given hash and hash on a server side
+				if hmac.Equal(h.Sum(nil), []byte(hash)) {
+					next.ServeHTTP(w, r)
+				} else {
+					http.Error(w, "Invalid hash", http.StatusBadRequest)
+					return
+				}
+
+			} else {
+				// No hash provided, allow the request
+				next.ServeHTTP(w, r)
+			}
+
+		})
+	}
+}
+
+// The Middleware takes a key and response body to calculate the hash and put it in the header
+func MiddlewareSetHash(key string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Get hash of a response body
+			hw := newWriterSubstituter(w)
+			next.ServeHTTP(hw, r)
+			// if no error in the response than we can calculate hash
+			if hw.buf.Len() > 0 {
+				h := hmac.New(sha256.New, []byte(key))
+				if _, err := h.Write(hw.buf.Bytes()); err != nil {
+					if err != nil {
+						http.Error(w, "Error computing hash", http.StatusInternalServerError)
+						return
+					}
+				}
+				hash := hex.EncodeToString(h.Sum(nil))
+				w.Header().Set("HashSHA256", hash)
+			}
+
+		})
+	}
+}
 
 func MiddlewareResponseZip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cw := newCompressWriter(w)
+		cw := newWriterSubstituter(w)
 		next.ServeHTTP(cw, r)
-		doeClientSupportGZIP := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
-		if doeClientSupportGZIP && shouldCompress(cw.Header().Get("Content-Type")) {
+		doesClientSupportGZIP := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+		if doesClientSupportGZIP && shouldCompress(cw.Header().Get("Content-Type")) {
 			if cw.buf.Len() > 0 {
 				w.Header().Set("Content-encoding", "gzip")
 				w.Header().Del("Content-Length")
@@ -143,26 +207,26 @@ func shouldCompress(contentType string) bool {
 	return false
 }
 
-type compressWriter struct {
+type WriterSubstituter struct {
 	w   http.ResponseWriter
 	buf *bytes.Buffer
 }
 
-func newCompressWriter(w http.ResponseWriter) *compressWriter {
-	return &compressWriter{
+func newWriterSubstituter(w http.ResponseWriter) *WriterSubstituter {
+	return &WriterSubstituter{
 		w:   w,
 		buf: bytes.NewBuffer([]byte{}),
 	}
 }
 
-func (c *compressWriter) Header() http.Header {
+func (c *WriterSubstituter) Header() http.Header {
 	return c.w.Header()
 }
 
-func (c *compressWriter) Write(p []byte) (int, error) {
+func (c *WriterSubstituter) Write(p []byte) (int, error) {
 	return c.buf.Write(p)
 }
 
-func (c *compressWriter) WriteHeader(statusCode int) {
+func (c *WriterSubstituter) WriteHeader(statusCode int) {
 	c.w.WriteHeader(statusCode)
 }
