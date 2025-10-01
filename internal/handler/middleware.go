@@ -102,35 +102,32 @@ func MiddlewareCheckHash(key string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if hash := r.Header.Get("HashSHA256"); hash != "" {
-				// Hash  was provided
-				data := []byte{}
-				if _, err := r.Body.Read(data); err != nil {
-					if err != io.EOF {
-						// Incorrect body
-						http.Error(w, "Error reading request body", http.StatusInternalServerError)
-						return
-					}
-				}
-				// Get another hash on a server side
+				// Create a tee reader to compute hash while preserving the body
+				var bodyBuffer bytes.Buffer
+				tee := io.TeeReader(r.Body, &bodyBuffer)
+
+				// Compute hash
 				h := hmac.New(sha256.New, []byte(key))
-				if _, err := h.Write(data); err != nil {
+				if _, err := io.Copy(h, tee); err != nil {
 					http.Error(w, "Error computing hash", http.StatusInternalServerError)
 					return
 				}
 
-				// Compare given hash and hash on a server side
-				if hmac.Equal(h.Sum(nil), []byte(hash)) {
-					next.ServeHTTP(w, r)
-				} else {
+				// Replace the body for subsequent handlers
+				r.Body.Close()
+				r.Body = io.NopCloser(&bodyBuffer)
+
+				// Compare hashes
+				serverHash := hex.EncodeToString(h.Sum(nil))
+				if !hmac.Equal([]byte(serverHash), []byte(hash)) {
+					// hashes are not equal, send error
 					http.Error(w, "Invalid hash", http.StatusBadRequest)
 					return
 				}
-
-			} else {
-				// No hash provided, allow the request
-				next.ServeHTTP(w, r)
 			}
 
+			// Continue to next handler
+			next.ServeHTTP(w, r)
 		})
 	}
 }
@@ -153,8 +150,8 @@ func MiddlewareSetHash(key string) func(next http.Handler) http.Handler {
 				}
 				hash := hex.EncodeToString(h.Sum(nil))
 				w.Header().Set("HashSHA256", hash)
+				w.Write(hw.buf.Bytes())
 			}
-
 		})
 	}
 }

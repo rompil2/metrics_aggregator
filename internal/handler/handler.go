@@ -44,12 +44,13 @@ func NewHandlerMux(service Service, tmpl *template.Template, key string) *Handle
 	h.Use(MiddlewareRequestUnzip)
 	h.Use(MiddlewareResponseZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
+
+	h.Use(NaiveLoggerMiddleware)
+	h.Use(middleware.Recoverer)
 	if key != "" {
 		h.Use(MiddlewareCheckHash(key))
 		h.Use(MiddlewareSetHash(key))
 	}
-	h.Use(NaiveLoggerMiddleware)
-	h.Use(middleware.Recoverer)
 
 	h.Get("/", h.HomePage)
 	h.Get("/ping", h.Ping)
