@@ -143,10 +143,8 @@ func MiddlewareSetHash(key string) func(next http.Handler) http.Handler {
 			if hw.buf.Len() > 0 {
 				h := hmac.New(sha256.New, []byte(key))
 				if _, err := h.Write(hw.buf.Bytes()); err != nil {
-					if err != nil {
-						http.Error(w, "Error computing hash", http.StatusInternalServerError)
-						return
-					}
+					http.Error(w, "Error computing hash", http.StatusInternalServerError)
+					return
 				}
 				hash := hex.EncodeToString(h.Sum(nil))
 				w.Header().Set("HashSHA256", hash)
