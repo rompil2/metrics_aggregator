@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,9 +63,9 @@ func TestHTTPClient_Run_MetricsProcessing_Individual(t *testing.T) {
 	t.Parallel()
 
 	// Создаем тестовый сервер для индивидуальных запросов
-	requestCount := 0
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt32(&requestCount, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -85,7 +86,7 @@ func TestHTTPClient_Run_MetricsProcessing_Individual(t *testing.T) {
 	}()
 
 	// Отправляем тестовые метрики
-	testMetrics := map[string]interface{}{
+	testMetrics := map[string]any{
 		"counter1": int64(42),
 		"gauge1":   3.14,
 	}
@@ -100,7 +101,12 @@ func TestHTTPClient_Run_MetricsProcessing_Individual(t *testing.T) {
 	client.mu.RUnlock()
 
 	// Должно быть 2 запроса (по одному на каждую метрику)
-	assert.GreaterOrEqual(t, requestCount, 2)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
 
 	cancel()
 	wg.Wait()
@@ -189,9 +195,9 @@ func TestHTTPClient_SendMetrics_Success(t *testing.T) {
 	t.Parallel()
 
 	// Создаем тестовый сервер
-	requestCount := 0
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt32(&requestCount, 1)
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/update/", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
@@ -210,7 +216,13 @@ func TestHTTPClient_SendMetrics_Success(t *testing.T) {
 	err := client.SendMetrics(context.Background(), metrics)
 	assert.NoError(t, err)
 	// Должно быть 2 запроса (по одному на каждую метрику)
-	assert.Equal(t, 2, requestCount)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
+
 }
 
 func TestHTTPClient_SendMetricsBatch_Success(t *testing.T) {
