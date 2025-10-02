@@ -52,6 +52,7 @@ func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEn
 			},
 			batchEnabled: batchEnabled,
 			hasher:       &hash,
+			mu:           sync.RWMutex{},
 		}
 	}
 	return &HTTPClient{
@@ -152,12 +153,15 @@ func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 			}
 			hashString := new(string)
 			if h.hasher != nil {
+				mu.Lock()
 				(*h.hasher).Reset()
 				if _, err := (*h.hasher).Write(buf); err != nil {
 					h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
+					mu.Unlock()
 					return
 				}
 				*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
+				mu.Unlock()
 			}
 
 			// Создаем сжатые данные
