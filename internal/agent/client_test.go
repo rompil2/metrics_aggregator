@@ -156,7 +156,7 @@ func TestHTTPClient_Run_MetricsProcessing_Batch(t *testing.T) {
 	client.mu.RUnlock()
 
 	// Должен быть 1 batch запрос
-	if atomic.LoadInt32(&requestCount) != 2 {
+	if atomic.LoadInt32(&requestCount) != 1 {
 		t.Errorf(
 			"Expected 2 requests, got %d",
 			atomic.LoadInt32(&requestCount),
