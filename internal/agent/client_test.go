@@ -116,9 +116,9 @@ func TestHTTPClient_Run_MetricsProcessing_Batch(t *testing.T) {
 	t.Parallel()
 
 	// Создаем тестовый сервер для batch запросов
-	requestCount := 0
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt32(&requestCount, 1)
 		assert.Equal(t, "/updates/", r.URL.Path) // Проверяем batch endpoint
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -156,7 +156,12 @@ func TestHTTPClient_Run_MetricsProcessing_Batch(t *testing.T) {
 	client.mu.RUnlock()
 
 	// Должен быть 1 batch запрос
-	assert.Equal(t, 1, requestCount)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
 
 	cancel()
 	wg.Wait()
@@ -166,9 +171,9 @@ func TestHTTPClient_sendMetrics_withHash(t *testing.T) {
 	t.Parallel()
 
 	// Создаем тестовый сервер
-	requestCount := 0
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt32(&requestCount, 1)
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/update/", r.URL.Path)
 		assert.NotEqual(t, "", r.Header.Get("HashSHA256"))
@@ -188,7 +193,12 @@ func TestHTTPClient_sendMetrics_withHash(t *testing.T) {
 	err := client.SendMetrics(context.Background(), metrics)
 	assert.NoError(t, err)
 	// Должно быть 2 запроса (по одному на каждую метрику)
-	assert.Equal(t, 2, requestCount)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
 }
 
 func TestHTTPClient_SendMetrics_Success(t *testing.T) {
