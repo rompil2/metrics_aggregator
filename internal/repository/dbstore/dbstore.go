@@ -15,8 +15,6 @@ import (
 	"github.com/rompil2/metrics_aggregator/migrations"
 )
 
-var db *sql.DB
-
 var retryDelays = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 
 const (
