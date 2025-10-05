@@ -149,6 +149,7 @@ type AgentConfig struct {
 	HashConfig
 	PollInterval   time.Duration
 	ReportInterval time.Duration
+	RateLimit      uint
 }
 
 func LoadAgentConfig(args []string) AgentConfig {
@@ -167,6 +168,7 @@ func LoadAgentConfig(args []string) AgentConfig {
 
 	pollInterval := flagSet.Uint("p", defaultPollInterval, "polling interval in seconds")
 	reportInterval := flagSet.Uint("r", defaultReportInterval, "report interval in seconds")
+	rateLimit := flagSet.Uint("l", 1, "rate limit for agent")
 
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
@@ -193,10 +195,17 @@ func LoadAgentConfig(args []string) AgentConfig {
 		log.Info().Str("KEY", val).Send()
 	}
 
+	if val, ok := os.LookupEnv("RATE_LIMIT"); ok {
+		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
+			*rateLimit = uint(parsed)
+		}
+	}
+
 	return AgentConfig{
 		SocketConfig:   socket,
 		PollInterval:   time.Duration(*pollInterval) * time.Second,
 		ReportInterval: time.Duration(*reportInterval) * time.Second,
 		HashConfig:     hashKey,
+		RateLimit:      *rateLimit,
 	}
 }

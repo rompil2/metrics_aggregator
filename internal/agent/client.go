@@ -38,9 +38,10 @@ type HTTPClient struct {
 	client         *http.Client
 	batchEnabled   bool
 	hasher         *hash.Hash
+	rateLimit      uint
 }
 
-func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string) *HTTPClient {
+func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string, rateLimit uint) *HTTPClient {
 	if hashKey != "" {
 		key := []byte(hashKey)
 		hash := hmac.New(sha256.New, key)
@@ -53,6 +54,7 @@ func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEn
 			batchEnabled: batchEnabled,
 			hasher:       &hash,
 			mu:           sync.RWMutex{},
+			rateLimit:    rateLimit,
 		}
 	}
 	return &HTTPClient{
@@ -72,6 +74,8 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 
 	errCh := make(chan error, errChSize)
 	defer close(errCh)
+
+	poolCh := make(chan struct{}, h.rateLimit)
 
 	var wg sync.WaitGroup
 
@@ -112,6 +116,15 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 			go func() {
 				defer wg.Done()
 				var err error
+				if h.rateLimit > 0 {
+					// The idea id that we keep sending request
+					// while the pool is not full, but he size of the pool we set by the Rete Limit.
+					poolCh <- struct{}{}
+					defer func() {
+						// The the finish sending a request then the pool is released.
+						<-poolCh
+					}()
+				}
 				if h.batchEnabled {
 					err = h.SendMetricsBatch(ctx, metrics)
 				} else {
