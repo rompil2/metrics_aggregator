@@ -23,8 +23,7 @@ func TestCollector_Run_MetricsDelivery(t *testing.T) {
 	t.Parallel()
 
 	collector := NewCollector(100 * time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	outputCh := make(chan map[string]any, 10)
 	go collector.Run(ctx, outputCh)
@@ -80,7 +79,7 @@ func TestCollector_Poll_AllMetricsPresent(t *testing.T) {
 		"HeapReleased", "HeapSys", "LastGC", "Lookups", "MCacheInuse",
 		"MCacheSys", "MSpanInuse", "MSpanSys", "Mallocs", "NextGC",
 		"NumForcedGC", "NumGC", "OtherSys", "PauseTotalNs", "StackInuse",
-		"StackSys", "Sys", "TotalAlloc", "PollCount",
+		"StackSys", "Sys", "TotalAlloc", "PollCount", "TotalMemory", "FreeMemory", "CPUutilization0",
 	}
 
 	for _, metric := range requiredMetrics {
