@@ -4,8 +4,12 @@ import (
 	"context"
 	"math/rand/v2"
 	"runtime"
+	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 type Collector struct {
@@ -74,6 +78,13 @@ func (r *Collector) Poll() map[string]any {
 	// Extra metrics
 	atomic.AddInt64(&r.pollCount, 1)
 	metrics["PollCount"] = atomic.LoadInt64(&r.pollCount)
-
+	v, _ := mem.VirtualMemory()
+	metrics["TotalMemory"] = float64(v.Total)
+	metrics["FreeMemory"] = float64(v.Free)
+	cs, _ := cpu.Percent(r.pollInterval, true)
+	for i, utilPerCore := range cs {
+		key := "CPUutilization" + strconv.Itoa(i)
+		metrics[key] = utilPerCore
+	}
 	return metrics
 }
