@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log"
 	"math/rand/v2"
 	"runtime"
 	"strconv"
@@ -78,13 +79,17 @@ func (r *Collector) Poll() map[string]any {
 	// Extra metrics
 	atomic.AddInt64(&r.pollCount, 1)
 	metrics["PollCount"] = atomic.LoadInt64(&r.pollCount)
-	v, _ := mem.VirtualMemory()
-	metrics["TotalMemory"] = float64(v.Total)
-	metrics["FreeMemory"] = float64(v.Free)
-	cs, _ := cpu.Percent(r.pollInterval, true)
-	for i, utilPerCore := range cs {
-		key := "CPUutilization" + strconv.Itoa(i)
-		metrics[key] = utilPerCore
+
+	if v, err := mem.VirtualMemory(); err != nil {
+		log.Printf("Failed to get memory stats: %v", err)
+	} else {
+		metrics["TotalMemory"] = float64(v.Total)
+		metrics["FreeMemory"] = float64(v.Free)
+		cs, _ := cpu.Percent(r.pollInterval, true)
+		for i, utilPerCore := range cs {
+			key := "CPUutilization" + strconv.Itoa(i)
+			metrics[key] = utilPerCore
+		}
 	}
 	return metrics
 }
