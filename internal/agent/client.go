@@ -30,6 +30,11 @@ const (
 
 type Metrics = map[string]any
 
+type JobMetrics struct {
+	compressedData *bytes.Buffer
+	Hash           *string
+}
+
 type HTTPClient struct {
 	mu             sync.RWMutex
 	lastMetrics    Metrics
@@ -75,8 +80,6 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	errCh := make(chan error, errChSize)
 	defer close(errCh)
 
-	poolCh := make(chan struct{}, h.rateLimit)
-
 	var wg sync.WaitGroup
 
 	// Обработчик ошибок
@@ -112,31 +115,19 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 				continue
 			}
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				var err error
-				if h.rateLimit > 0 {
-					// The idea id that we keep sending request
-					// while the pool is not full, but he size of the pool we set by the Rete Limit.
-					poolCh <- struct{}{}
-					defer func() {
-						// The the finish sending a request then the pool is released.
-						<-poolCh
-					}()
+			var err error
+			if h.rateLimit < 2 {
+				err = h.SendMetricsBatch(ctx, metrics)
+			} else {
+				err = h.SendMetrics(ctx, metrics)
+			}
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
 				}
-				if h.batchEnabled {
-					err = h.SendMetricsBatch(ctx, metrics)
-				} else {
-					err = h.SendMetrics(ctx, metrics)
-				}
-				if err != nil {
-					select {
-					case errCh <- err:
-					default:
-					}
-				}
-			}()
+			}
+
 		}
 	}
 }
@@ -144,55 +135,83 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 	var errs []error
 	var mu sync.Mutex
+
+	jobQueue := make(chan JobMetrics)
+	mp := HTTPMetricProcessor{}
+	url := h.socket + updatePath
+
 	var wg sync.WaitGroup
 
-	for k, v := range metrics {
+	for i := 0; i < int(h.rateLimit); i++ {
 		wg.Add(1)
-
-		go func(key string, value any) {
+		// run a worker
+		go func(jobQueue <-chan JobMetrics) {
 			defer wg.Done()
 
-			mp := HTTPMetricProcessor{}
-			metric, err := mp.CreateMetric(key, value)
-			if err != nil {
-				h.appendError(&mu, &errs, err)
-				return
-			}
-
-			buf, err := mp.MarshalMetric(metric)
-			if err != nil {
-				h.appendError(&mu, &errs, err)
-				return
-			}
-			hashString := new(string)
-			if h.hasher != nil {
-				mu.Lock()
-				(*h.hasher).Reset()
-				if _, err := (*h.hasher).Write(buf); err != nil {
-					h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
-					mu.Unlock()
+			for {
+				select {
+				case <-ctx.Done():
 					return
+				case job, ok := <-jobQueue:
+					if !ok {
+						return
+					}
+					// Actually send a request
+					err := h.sendRequest(ctx, url, job.compressedData, job.Hash)
+					if err != nil {
+						h.appendError(&mu, &errs, fmt.Errorf("sending metric error: %w", err))
+					}
+
 				}
-				*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
-				mu.Unlock()
-			}
 
-			// Создаем сжатые данные
-			compressedData, err := h.compressData(buf)
-			if err != nil {
-				h.appendError(&mu, &errs, fmt.Errorf("compressing data for %s: %w", key, err))
-				return
 			}
-
-			// Отправляем запрос
-			url := h.socket + updatePath
-			err = h.sendRequest(ctx, url, compressedData, hashString)
-			if err != nil {
-				h.appendError(&mu, &errs, fmt.Errorf("sending metric %s: %w", key, err))
-			}
-		}(k, v)
+		}(jobQueue)
 	}
+producerLoop:
+	for key, value := range metrics {
+		// Send every metrics  to a worker goroutine
+		metric, err := mp.CreateMetric(key, value)
+		if err != nil {
+			h.appendError(&mu, &errs, err)
+			break
+		}
 
+		buf, err := mp.MarshalMetric(metric)
+		if err != nil {
+			h.appendError(&mu, &errs, err)
+			break
+		}
+		hashString := new(string)
+		if h.hasher != nil {
+			mu.Lock()
+			(*h.hasher).Reset()
+			if _, err := (*h.hasher).Write(buf); err != nil {
+				h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
+				mu.Unlock()
+				break
+			}
+			*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
+			mu.Unlock()
+		}
+
+		// Создаем сжатые данные
+		compressedData, err := h.compressData(buf)
+		if err != nil {
+			h.appendError(&mu, &errs, fmt.Errorf("compressing data for %s: %w", key, err))
+			break
+		}
+		job := JobMetrics{
+			compressedData: compressedData,
+			Hash:           hashString,
+		}
+		select {
+		case <-ctx.Done():
+			break producerLoop
+		case jobQueue <- job:
+		}
+
+	}
+	close(jobQueue)
 	wg.Wait()
 
 	return h.handleErrors(errs)
@@ -233,8 +252,6 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 	url := h.socket + batchUpdatePath // Используем отдельный endpoint для batch
 	return h.sendRequest(ctx, url, compressedData, hashString)
 }
-
-// Вспомогательные методы
 
 func (h *HTTPClient) createMetricsBatch(metrics Metrics) ([]model.Metrics, []error) {
 	var errs []error
@@ -372,12 +389,11 @@ func (h *HTTPClient) handleErrors(errs []error) error {
 		return nil
 	}
 
-	// Для множественных ошибок можно использовать errors.Join в Go 1.20+
 	if len(errs) == 1 {
 		return errs[0]
 	}
 
-	return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errs[0])
+	return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errors.Join(errs...))
 }
 
 // Остальной код без изменений...
