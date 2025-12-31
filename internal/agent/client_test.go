@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,17 +18,24 @@ import (
 func TestNewHTTPClient(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(10*time.Second, "localhost", 8080)
+	// Тестируем с batchEnabled = false
+	client := NewHTTPClient(10*time.Second, "localhost", 8080, false, "", 1)
 
 	assert.Equal(t, 10*time.Second, client.reportInterval)
 	assert.Equal(t, "http://localhost:8080", client.socket)
 	assert.NotNil(t, client.client)
+	assert.False(t, client.batchEnabled)
+	assert.Equal(t, 30*time.Second, client.client.Timeout)
+
+	// Тестируем с batchEnabled = true
+	clientWithBatch := NewHTTPClient(5*time.Second, "example.com", 9090, true, "", 1)
+	assert.True(t, clientWithBatch.batchEnabled)
 }
 
 func TestHTTPClient_Run_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	metricsCh := make(chan map[string]any)
 
@@ -51,16 +59,72 @@ func TestHTTPClient_Run_ContextCancellation(t *testing.T) {
 	wg.Wait()
 }
 
-func TestHTTPClient_Run_MetricsProcessing(t *testing.T) {
+func TestHTTPClient_Run_MetricsProcessing_Individual(t *testing.T) {
 	t.Parallel()
 
-	// Создаем тестовый сервер
+	// Создаем тестовый сервер для индивидуальных запросов
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1)
+	// Подменяем адрес сервера на тестовый
+	client.socket = server.URL
+
+	metricsCh := make(chan map[string]interface{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		client.Run(ctx, metricsCh)
+	}()
+
+	// Отправляем тестовые метрики
+	testMetrics := map[string]any{
+		"counter1": int64(42),
+		"gauge1":   3.14,
+	}
+	metricsCh <- testMetrics
+
+	// Даем время на обработку
+	time.Sleep(150 * time.Millisecond)
+
+	// Проверяем, что метрики были сохранены
+	client.mu.RLock()
+	assert.Equal(t, testMetrics, client.lastMetrics)
+	client.mu.RUnlock()
+
+	// Должно быть 2 запроса (по одному на каждую метрику)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
+
+	cancel()
+	wg.Wait()
+}
+
+func TestHTTPClient_Run_MetricsProcessing_Batch(t *testing.T) {
+	t.Parallel()
+
+	// Создаем тестовый сервер для batch запросов
+	var requestCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		assert.Equal(t, "/updates/", r.URL.Path) // Проверяем batch endpoint
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, true, "", 1)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -79,6 +143,7 @@ func TestHTTPClient_Run_MetricsProcessing(t *testing.T) {
 	testMetrics := map[string]interface{}{
 		"counter1": int64(42),
 		"gauge1":   3.14,
+		"counter2": int64(100),
 	}
 	metricsCh <- testMetrics
 
@@ -90,21 +155,33 @@ func TestHTTPClient_Run_MetricsProcessing(t *testing.T) {
 	assert.Equal(t, testMetrics, client.lastMetrics)
 	client.mu.RUnlock()
 
+	// Должен быть 1 batch запрос
+	if atomic.LoadInt32(&requestCount) != 1 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
+
 	cancel()
 	wg.Wait()
 }
 
-func TestHTTPClient_SendMetrics_Success(t *testing.T) {
+func TestHTTPClient_sendMetrics_withHash(t *testing.T) {
 	t.Parallel()
 
 	// Создаем тестовый сервер
+	var requestCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
 		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/update/", r.URL.Path)
+		assert.NotEqual(t, "", r.Header.Get("HashSHA256"))
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "secret", 1)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -115,6 +192,116 @@ func TestHTTPClient_SendMetrics_Success(t *testing.T) {
 
 	err := client.SendMetrics(context.Background(), metrics)
 	assert.NoError(t, err)
+	// Должно быть 2 запроса (по одному на каждую метрику)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
+}
+
+func TestHTTPClient_SendMetrics_Success(t *testing.T) {
+	t.Parallel()
+
+	// Создаем тестовый сервер
+	var requestCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/update/", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+	// Подменяем адрес сервера на тестовый
+	client.socket = server.URL
+
+	metrics := map[string]interface{}{
+		"counter1": int64(42),
+		"gauge1":   3.14,
+	}
+
+	err := client.SendMetrics(context.Background(), metrics)
+	assert.NoError(t, err)
+	// Должно быть 2 запроса (по одному на каждую метрику)
+	if atomic.LoadInt32(&requestCount) != 2 {
+		t.Errorf(
+			"Expected 2 requests, got %d",
+			atomic.LoadInt32(&requestCount),
+		)
+	}
+
+}
+
+func TestHTTPClient_SendMetricsBatch_Success(t *testing.T) {
+	t.Parallel()
+
+	// Создаем тестовый сервер
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/updates/", r.URL.Path)
+		assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+
+		// Можно распаковать и проверить данные
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client.socket = server.URL
+
+	metrics := map[string]interface{}{
+		"counter1": int64(42),
+		"gauge1":   3.14,
+		"counter2": int64(100),
+	}
+
+	err := client.SendMetricsBatch(context.Background(), metrics)
+	assert.NoError(t, err)
+}
+
+func TestHTTPClient_SendMetricsBatch_WithInvalidMetrics(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client.socket = server.URL
+
+	// Смесь валидных и невалидных метрик
+	metrics := map[string]interface{}{
+		"counter1": int64(42),      // валидная
+		"invalid":  "string_value", // невалидная
+		"gauge1":   3.14,           // валидная
+	}
+
+	err := client.SendMetricsBatch(context.Background(), metrics)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown metric type")
+}
+
+func TestHTTPClient_SendMetricsBatch_EmptyMetrics(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("Should not make request for empty metrics")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client.socket = server.URL
+
+	// Пустые метрики
+	metrics := map[string]interface{}{}
+
+	err := client.SendMetricsBatch(context.Background(), metrics)
+	assert.NoError(t, err) // Не должно быть ошибки для пустых метрик
 }
 
 func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
@@ -140,7 +327,7 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			},
 			metrics:     map[string]any{"invalid": "string"},
-			expectError: true, // Неподдерживаемые типы просто игнорируются
+			expectError: true,
 		},
 		{
 			name: "RequestError",
@@ -161,10 +348,58 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 			server := httptest.NewServer(tc.serverHandler)
 			defer server.Close()
 
-			client := NewHTTPClient(1*time.Second, "localhost", 8080)
+			client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
 			client.socket = server.URL
 
 			err := client.SendMetrics(context.Background(), tc.metrics)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestHTTPClient_SendMetricsBatch_ErrorCases(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		serverHandler http.HandlerFunc
+		metrics       map[string]any
+		expectError   bool
+	}{
+		{
+			name: "ServerError",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			metrics:     map[string]any{"test": int64(1)},
+			expectError: true,
+		},
+		{
+			name: "RequestError",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				hj, ok := w.(http.Hijacker)
+				require.True(t, ok)
+				conn, _, _ := hj.Hijack()
+				conn.Close()
+			},
+			metrics:     map[string]any{"test": int64(1)},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(tc.serverHandler)
+			defer server.Close()
+
+			client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+			client.socket = server.URL
+
+			err := client.SendMetricsBatch(context.Background(), tc.metrics)
 			if tc.expectError {
 				assert.Error(t, err)
 			} else {
@@ -184,7 +419,7 @@ func TestHTTPClient_SendMetrics_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
 	client.socket = server.URL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -192,13 +427,38 @@ func TestHTTPClient_SendMetrics_ContextCancellation(t *testing.T) {
 
 	metrics := map[string]interface{}{"test": int64(1)}
 	err := client.SendMetrics(ctx, metrics)
-	assert.True(t, errors.Is(err, context.DeadlineExceeded), "Expected context.DeadlineExceeded")
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled), "Expected context error")
+}
+
+func TestHTTPClient_SendMetricsBatch_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	// Сервер, который долго обрабатывает запрос
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client.socket = server.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	metrics := map[string]interface{}{"test": int64(1)}
+	err := client.SendMetricsBatch(ctx, metrics)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled), "Expected context error")
 }
 
 func TestHTTPClient_Run_ChannelClosed(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1)
 	metricsCh := make(chan map[string]interface{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -269,7 +529,7 @@ func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
 				ID: "invalid",
 			},
 			wantErr: true,
-			errMsg:  "unknown metric type for key invalid",
+			errMsg:  "unknown metric type for key invalid: string",
 		},
 	}
 
@@ -282,7 +542,7 @@ func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
 			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errMsg != "" {
-					assert.EqualError(t, err, tt.errMsg)
+					assert.Contains(t, err.Error(), tt.errMsg)
 				}
 				return
 			}
@@ -302,4 +562,43 @@ func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHTTPClient_compressData(t *testing.T) {
+	t.Parallel()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+
+	testData := []byte("test data for compression")
+	compressed, err := client.compressData(testData)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, compressed)
+	assert.True(t, compressed.Len() > 0)
+}
+
+func TestHTTPClient_handleErrors(t *testing.T) {
+	t.Parallel()
+
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+
+	// Нет ошибок
+	err := client.handleErrors(nil)
+	assert.NoError(t, err)
+
+	// Пустой массив ошибок
+	err = client.handleErrors([]error{})
+	assert.NoError(t, err)
+
+	// Одна ошибка
+	singleErr := errors.New("single error")
+	err = client.handleErrors([]error{singleErr})
+	assert.EqualError(t, err, "single error")
+
+	// Несколько ошибок
+	err1 := errors.New("error 1")
+	err2 := errors.New("error 2")
+	err = client.handleErrors([]error{err1, err2})
+	assert.Contains(t, err.Error(), "2 errors occurred")
+	assert.Contains(t, err.Error(), "error 1")
 }

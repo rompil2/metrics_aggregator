@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash"
+	"io"
 	"log"
 	"maps"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +23,17 @@ import (
 )
 
 const (
-	errChSize            = 1
-	lenOfEmptyCollection = 0
-	updatePath           = "/update/"
+	errChSize       = 1
+	updatePath      = "/update/"
+	batchUpdatePath = "/updates/" // Добавляем отдельный путь для batch обновлений
 )
 
 type Metrics = map[string]any
+
+type JobMetrics struct {
+	compressedData *bytes.Buffer
+	Hash           *string
+}
 
 type HTTPClient struct {
 	mu             sync.RWMutex
@@ -29,13 +41,35 @@ type HTTPClient struct {
 	reportInterval time.Duration
 	socket         string
 	client         *http.Client
+	batchEnabled   bool
+	hasher         *hash.Hash
+	rateLimit      uint
 }
 
-func NewHTTPClient(reportInterval time.Duration, host string, port uint) *HTTPClient {
+func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string, rateLimit uint) *HTTPClient {
+	if hashKey != "" {
+		key := []byte(hashKey)
+		hash := hmac.New(sha256.New, key)
+		return &HTTPClient{
+			reportInterval: reportInterval,
+			socket:         fmt.Sprintf("http://%s:%v", host, port),
+			client: &http.Client{
+				Timeout: 30 * time.Second, // Добавляем таймаут
+			},
+			batchEnabled: batchEnabled,
+			hasher:       &hash,
+			mu:           sync.RWMutex{},
+			rateLimit:    rateLimit,
+		}
+	}
 	return &HTTPClient{
 		reportInterval: reportInterval,
 		socket:         fmt.Sprintf("http://%s:%v", host, port),
-		client:         &http.Client{},
+		client: &http.Client{
+			Timeout: 30 * time.Second, // Добавляем таймаут
+		},
+		batchEnabled: batchEnabled,
+		hasher:       nil,
 	}
 }
 
@@ -43,32 +77,35 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	ticker := time.NewTicker(h.reportInterval)
 	defer ticker.Stop()
 
-	errCh := make(chan error, errChSize) //Buffer is to avoid stacking
+	errCh := make(chan error, errChSize)
 	defer close(errCh)
 
 	var wg sync.WaitGroup
 
+	// Обработчик ошибок
 	go func() {
-		for err := range errCh { // read errors
-			log.Printf("HTTP client error: %v", err)
+		for err := range errCh {
+			if err != nil {
+				log.Printf("HTTP client error: %v", err)
+			}
 		}
 	}()
 
 	for {
 		select {
 		case <-ctx.Done():
-			wg.Wait() // wait when all goroutines are completed
+			wg.Wait()
 			return
 
 		case m, ok := <-ch:
 			if !ok {
-				continue //the channel is closed
+				continue
 			}
 			h.mu.Lock()
 			h.lastMetrics = m
 			h.mu.Unlock()
 
-		case <-ticker.C: // Time to send metrics to the server
+		case <-ticker.C:
 			h.mu.RLock()
 			metrics := make(Metrics, len(h.lastMetrics))
 			maps.Copy(metrics, h.lastMetrics)
@@ -78,103 +115,288 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 				continue
 			}
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if err := h.SendMetrics(ctx, metrics); err != nil {
-					select {
-					case errCh <- err:
-					default: // avoid blocking if errCh is full
-					}
+			var err error
+			if h.rateLimit < 2 {
+				err = h.SendMetricsBatch(ctx, metrics)
+			} else {
+				err = h.SendMetrics(ctx, metrics)
+			}
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
 				}
-			}()
+			}
+
 		}
 	}
 }
 
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
-
 	var errs []error
 	var mu sync.Mutex
+
+	jobQueue := make(chan JobMetrics)
+	mp := HTTPMetricProcessor{}
+	url := h.socket + updatePath
+
 	var wg sync.WaitGroup
 
-	for k, v := range metrics {
+	for i := 0; i < int(h.rateLimit); i++ {
 		wg.Add(1)
-
-		go func(key string, value any) {
+		// run a worker
+		go func(jobQueue <-chan JobMetrics) {
 			defer wg.Done()
-			// prepare data
-			mp := HTTPMetricProcessor{}
-			metric, err := mp.CreateMetric(key, value)
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, err)
-				mu.Unlock()
-				return
-			}
-			buf, err := mp.MarshalMetric(metric)
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, err)
-				mu.Unlock()
-				return
-			}
-			// compress data
-			zbuf := bytes.NewBuffer(nil)
-			zb := gzip.NewWriter(zbuf)
-			_, err = zb.Write(buf)
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("compressing data  for %s: %w", key, err))
-				mu.Unlock()
-				return
-			}
-			defer zb.Close()
-			err = zb.Flush()
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("flushing data  for %s: %w", key, err))
-				mu.Unlock()
-				return
-			}
-			// Send compressed data
-			url := h.socket + updatePath
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, zbuf)
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("create request for %s: %w", key, err))
-				mu.Unlock()
-				return
-			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Content-Encoding", "gzip")
 
-			resp, err := h.client.Do(req)
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("send metric %s: %w", key, err))
-				mu.Unlock()
-				return
-			}
-			defer resp.Body.Close()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case job, ok := <-jobQueue:
+					if !ok {
+						return
+					}
+					// Actually send a request
+					err := h.sendRequest(ctx, url, job.compressedData, job.Hash)
+					if err != nil {
+						h.appendError(&mu, &errs, fmt.Errorf("sending metric error: %w", err))
+					}
 
-			if resp.StatusCode >= http.StatusBadRequest {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("bad status for %s: %d", key, resp.StatusCode))
-				mu.Unlock()
-				return
+				}
+
 			}
-		}(k, v)
+		}(jobQueue)
 	}
+producerLoop:
+	for key, value := range metrics {
+		// Send every metrics  to a worker goroutine
+		metric, err := mp.CreateMetric(key, value)
+		if err != nil {
+			h.appendError(&mu, &errs, err)
+			break
+		}
 
+		buf, err := mp.MarshalMetric(metric)
+		if err != nil {
+			h.appendError(&mu, &errs, err)
+			break
+		}
+		hashString := new(string)
+		if h.hasher != nil {
+			mu.Lock()
+			(*h.hasher).Reset()
+			if _, err := (*h.hasher).Write(buf); err != nil {
+				h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
+				mu.Unlock()
+				break
+			}
+			*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
+			mu.Unlock()
+		}
+
+		// Создаем сжатые данные
+		compressedData, err := h.compressData(buf)
+		if err != nil {
+			h.appendError(&mu, &errs, fmt.Errorf("compressing data for %s: %w", key, err))
+			break
+		}
+		job := JobMetrics{
+			compressedData: compressedData,
+			Hash:           hashString,
+		}
+		select {
+		case <-ctx.Done():
+			break producerLoop
+		case jobQueue <- job:
+		}
+
+	}
+	close(jobQueue)
 	wg.Wait()
 
-	if len(errs) > lenOfEmptyCollection {
-		return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errs[0])
-	}
-	return nil
+	return h.handleErrors(errs)
 }
 
+func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) error {
+	// Создаем batch метрик
+	metricsBatch, errs := h.createMetricsBatch(metrics)
+	if len(errs) > 0 {
+		return h.handleErrors(errs)
+	}
+
+	if len(metricsBatch) == 0 {
+		return nil // Нет валидных метрик для отправки
+	}
+
+	// Маршалим в JSON
+	jsonData, err := json.Marshal(metricsBatch)
+	if err != nil {
+		return fmt.Errorf("marshaling metrics batch: %w", err)
+	}
+	hashString := new(string)
+	if h.hasher != nil {
+		(*h.hasher).Reset()
+		if _, err := (*h.hasher).Write(jsonData); err != nil {
+			return fmt.Errorf("hashing data: %w", err)
+		}
+		*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
+	}
+
+	// Сжимаем данные
+	compressedData, err := h.compressData(jsonData)
+	if err != nil {
+		return fmt.Errorf("compressing batch data: %w", err)
+	}
+
+	// Отправляем запрос
+	url := h.socket + batchUpdatePath // Используем отдельный endpoint для batch
+	return h.sendRequest(ctx, url, compressedData, hashString)
+}
+
+func (h *HTTPClient) createMetricsBatch(metrics Metrics) ([]model.Metrics, []error) {
+	var errs []error
+	metricsBatch := make([]model.Metrics, 0, len(metrics))
+	mp := HTTPMetricProcessor{}
+
+	for key, value := range metrics {
+		metric, err := mp.CreateMetric(key, value)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("creating metric %s: %w", key, err))
+			continue
+		}
+		metricsBatch = append(metricsBatch, metric)
+	}
+
+	return metricsBatch, errs
+}
+
+func (h *HTTPClient) compressData(data []byte) (*bytes.Buffer, error) {
+	var zbuf bytes.Buffer
+	zw := gzip.NewWriter(&zbuf)
+
+	if _, err := zw.Write(data); err != nil {
+		zw.Close()
+		return nil, fmt.Errorf("writing to gzip writer: %w", err)
+	}
+
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("closing gzip writer: %w", err)
+	}
+
+	return &zbuf, nil
+}
+
+func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Buffer, hash *string) error {
+	const maxAttempts = 3
+	retryDelays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+
+	var lastErr error
+
+	for attempt := range maxAttempts {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+		if err != nil {
+			return fmt.Errorf("creating request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Accept-Encoding", "gzip")
+		if hash != nil {
+			req.Header.Set("HashSHA256", *hash)
+		}
+
+		resp, err := h.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("sending request: %w", err)
+
+			// Check if error is retriable
+			if !h.isRetriableError(err) || attempt == maxAttempts-1 {
+				return lastErr
+			}
+
+			// Wait before retrying
+			select {
+			case <-time.After(retryDelays[attempt]):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= http.StatusBadRequest {
+			lastErr = fmt.Errorf("server returned status: %d %s", resp.StatusCode, resp.Status)
+
+			// Check if status code is retriable (5xx errors are usually retriable)
+			if !h.isRetriableStatusCode(resp.StatusCode) || attempt == maxAttempts-1 {
+				return lastErr
+			}
+
+			// Wait before retrying
+			select {
+			case <-time.After(retryDelays[attempt]):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("all %d attempts failed, last error: %w", maxAttempts, lastErr)
+}
+
+// isRetriableError checks if an error is retriable
+func (h *HTTPClient) isRetriableError(err error) bool {
+	// Network errors, timeouts, and temporary errors are retriable
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return netErr.Timeout()
+	}
+
+	// DNS errors are retriable
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	// Connection errors are retriable
+	if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "connection") {
+		return true
+	}
+
+	return false
+}
+
+// isRetriableStatusCode checks if an HTTP status code is retriable
+func (h *HTTPClient) isRetriableStatusCode(statusCode int) bool {
+	// 5xx errors are server errors and usually retriable
+	// 429 (Too Many Requests) and 408 (Request Timeout) are also retriable
+	return statusCode >= 500 && statusCode < 600 ||
+		statusCode == http.StatusTooManyRequests ||
+		statusCode == http.StatusRequestTimeout
+}
+
+func (h *HTTPClient) appendError(mu *sync.Mutex, errs *[]error, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+	*errs = append(*errs, err)
+}
+
+func (h *HTTPClient) handleErrors(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+
+	if len(errs) == 1 {
+		return errs[0]
+	}
+
+	return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errors.Join(errs...))
+}
+
+// Остальной код без изменений...
 type MetricProcessor interface {
 	CreateMetric(key string, value any) (model.Metrics, error)
 	MarshalMetric(metric model.Metrics) ([]byte, error)
@@ -194,7 +416,7 @@ func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics
 		m.MType = model.Gauge
 		m.Value = &val
 	default:
-		return m, fmt.Errorf("unknown metric type for key %s", key)
+		return m, fmt.Errorf("unknown metric type for key %s: %T", key, value)
 	}
 
 	return m, nil

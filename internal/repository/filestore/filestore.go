@@ -1,4 +1,4 @@
-package store
+package filestore
 
 import (
 	"context"
@@ -11,14 +11,10 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/config"
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 	"github.com/rompil2/metrics_aggregator/internal/model"
+	"github.com/rompil2/metrics_aggregator/internal/repository"
 )
 
-type Repo interface {
-	SetMetrics(ID string, value any) error
-	GetMetrics(ID string) (any, error)
-	AllMetrics() ([]any, error)
-}
-
+type Repo = repository.Repo
 type Store struct {
 	Repo
 	storeFilePath string
@@ -31,7 +27,7 @@ type Store struct {
 
 var log = logger.Get()
 
-func NewStore(repo Repo, cfg config.StoreConfig) (*Store, error) {
+func NewFileStore(repo Repo, cfg config.StoreConfig) (*Store, error) {
 	st := &Store{
 		Repo:          repo,
 		interval:      cfg.StoreInterval,
@@ -54,7 +50,7 @@ func NewStore(repo Repo, cfg config.StoreConfig) (*Store, error) {
 	return st, nil
 }
 
-func (st *Store) SetMetrics(ID string, value any) error {
+func (st *Store) SetMetrics(ID string, value model.Metrics) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
@@ -94,7 +90,7 @@ func (st *Store) Restore() error {
 		if err := decoder.Decode(&metric); err != nil {
 			return err
 		}
-		if err := st.SetMetrics(metric.ID, &metric); err != nil {
+		if err := st.SetMetrics(metric.ID, metric); err != nil {
 			return err
 		}
 		locallog.Str(metric.ID, "restored")
@@ -120,7 +116,7 @@ func (st *Store) Save(ctx context.Context) {
 		st.mu.RLock()
 		defer st.mu.RUnlock()
 
-		allMetrics, err := st.AllMetrics()
+		allMetrics, err := st.GetAllMetrics()
 		if err != nil {
 			return err
 		}

@@ -1,91 +1,87 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
+// Service-level errors
 var (
-	ErrMetricCreated  = errors.New("unknown metrics ID, created the new one")
-	ErrMetricNotFound = errors.New("metric not found")
+	ErrMetricNotFound = fmt.Errorf("metric not found")
+	ErrMetricCreated  = fmt.Errorf("metric created")
 )
 
 type Repo interface {
-	SetMetrics(ID string, value any) error
-	GetMetrics(ID string) (any, error)
-	AllMetrics() ([]any, error)
+	SetMetrics(ID string, value model.Metrics) error
+	GetMetrics(ID string) (model.Metrics, error)
+	GetAllMetrics() ([]model.Metrics, error)
+	SetAllMetrics([]model.Metrics) error
+	Ping() error
 }
 
 type MetricService struct {
-	repository *Repo
+	repository Repo
 }
 
-// Returns all available metrics in the repository.
-func (s *MetricService) AllMetrics() ([]model.Metrics, error) {
-	if data, err := (*s.repository).AllMetrics(); err != nil {
-		return nil, err
-	} else {
-		var metrics []model.Metrics
-		for _, v := range data {
-			if value, ok := v.(*model.Metrics); ok {
-				metrics = append(metrics, *value)
-			}
-		}
-		return metrics, nil
+// NewMetricService creates a new MetricService instance
+func NewMetricService(repository Repo) *MetricService {
+	return &MetricService{
+		repository: repository,
 	}
 }
 
-// Returns metrics with the given ID.
-func (s *MetricService) GetMetrics(ID string) (model.Metrics, error) {
-	storedData, err := (*s.repository).GetMetrics(ID)
+// GetAllMetrics returns all available metrics from the repository
+func (s *MetricService) GetAllMetrics() ([]model.Metrics, error) {
+	metrics, err := s.repository.GetAllMetrics()
 	if err != nil {
-		return model.Metrics{}, ErrMetricNotFound
+		return nil, fmt.Errorf("failed to get all metrics: %w", err)
 	}
-	return *(storedData).(*model.Metrics), nil
+	return metrics, nil
 }
 
-// Updates metrics with the given ID. either it is Counter or Gauge.
-func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
-	id := metric.ID
-	storedData, err := (*s.repository).GetMetrics(id)
+// GetMetrics returns metrics with the given ID
+func (s *MetricService) GetMetrics(ID string) (model.Metrics, error) {
+	storedData, err := s.repository.GetMetrics(ID)
+	if err != nil {
+		return model.Metrics{}, fmt.Errorf("%w: %s", ErrMetricNotFound, ID)
+	}
+	return storedData, nil
+}
 
-	if err != nil { //if metric doesn't exist
-		err := (*s.repository).SetMetrics(id, metric)
-		if err != nil {
-			return err
+// UpdateMetrics updates or creates metrics with the given ID
+func (s *MetricService) UpdateMetrics(metric *model.Metrics) error {
+	_, err := s.repository.GetMetrics(metric.ID)
+	if err != nil {
+		// Metric doesn't exist, create new one
+		if err := s.repository.SetMetrics(metric.ID, *metric); err != nil {
+			return fmt.Errorf("failed to create metric: %w", err)
 		}
 		return ErrMetricCreated
 	}
-	if storedData != nil {
-		var existedMetrics model.Metrics
-		if d, ok := (storedData).(*model.Metrics); !ok {
-			panic("Unknown type of stored data") //shouldn't happen
-		} else {
-			existedMetrics = *d
-		}
-		switch metric.MType {
-		case model.Counter:
-			if existedMetrics.Delta != nil {
-				*existedMetrics.Delta += *metric.Delta // TODO suspicios place
-			} else {
-				existedMetrics.Delta = metric.Delta
-			}
-		case model.Gauge:
-			*existedMetrics.Value = *metric.Value
-		default:
-			panic("Unknown type of metric") //shouldn't happen
-		}
-		err := (*s.repository).SetMetrics(id, &existedMetrics)
-		if err != nil {
-			return err
-		}
+
+	// Metric exists, update it
+	if err := s.repository.SetMetrics(metric.ID, *metric); err != nil {
+		return fmt.Errorf("failed to update metric: %w", err)
 	}
 	return nil
 }
 
-func NewMetricService(repository Repo) MetricService {
-	return MetricService{
-		repository: &repository,
+// UpdateAllMetrics updates multiple metrics at once
+func (s *MetricService) UpdateAllMetrics(metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
 	}
+	if err := s.repository.SetAllMetrics(metrics); err != nil {
+		return fmt.Errorf("failed to update all metrics: %w", err)
+	}
+	return nil
+}
+
+// Ping checks the repository connection
+func (s *MetricService) Ping() error {
+	if err := s.repository.Ping(); err != nil {
+		return fmt.Errorf("repository ping failed: %w", err)
+	}
+	return nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"html/template"
 	"log"
 	"net/http"
@@ -10,31 +11,56 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/rompil2/metrics_aggregator/internal/config"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
-	"github.com/rompil2/metrics_aggregator/internal/repository"
+	"github.com/rompil2/metrics_aggregator/internal/repository/dbstore"
+	"github.com/rompil2/metrics_aggregator/internal/repository/filestore"
+	"github.com/rompil2/metrics_aggregator/internal/repository/memstore"
 	"github.com/rompil2/metrics_aggregator/internal/service"
-	"github.com/rompil2/metrics_aggregator/internal/store"
 )
 
 func main() {
+	var (
+		repo service.Repo
+	)
 	cfg := config.LoadServerConfig(os.Args[1:])
 
-	repository, err := repository.NewMemStorage()
-	if err != nil {
-		log.Fatal(err)
-	}
-	store, err := store.NewStore(repository, cfg.StoreConfig)
-	if err != nil {
-		log.Fatal(err)
+	if cfg.DBConnStr == "" {
+		// Connecition string is not set
+		memRepo := memstore.NewMemStore()
+
+		repo = memRepo
+		if cfg.FileStoragePath != "" {
+			filerepo, err := filestore.NewFileStore(repo, cfg.StoreConfig)
+			if err != nil {
+				log.Fatal(err)
+			}
+			repo = filerepo
+
+		}
+	} else {
+		// There is some connection string
+		db, err := sql.Open("pgx", cfg.DBConnStr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		dbRepo, err := dbstore.NewDBStore(db)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer dbRepo.Close()
+
+		repo = dbRepo
 	}
 
-	srvc := service.NewMetricService(store)
+	srvc := service.NewMetricService(repo)
 
-	handler := handler.NewHandlerMux(&srvc, template.Must(template.ParseFiles("templates/index.html")))
+	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles("templates/index.html")), cfg.HashConfig.String())
 
 	server := &http.Server{
-		Addr:    cfg.String(),
+		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,
 	}
 
