@@ -67,6 +67,32 @@ func (h *HashConfig) Set(flagVal string) error {
 	return nil
 }
 
+type Audit struct {
+	auditSink string
+}
+
+func (a *Audit) String() string {
+	return a.auditSink
+}
+
+func (a *Audit) Set(flagVal string) error {
+	a.auditSink = flagVal
+	return nil
+}
+
+type AuditFile struct {
+	Audit
+}
+
+type AuditURL struct {
+	Audit
+}
+
+type AuditConfig struct {
+	auditFile AuditFile
+	auditURL  AuditURL
+}
+
 type StoreConfig struct {
 	StoreInterval   time.Duration
 	FileStoragePath string
@@ -78,6 +104,7 @@ type ServerConfig struct {
 	SocketConfig
 	StoreConfig
 	HashConfig
+	AuditConfig
 }
 
 func LoadServerConfig(args []string) ServerConfig {
@@ -90,13 +117,17 @@ func LoadServerConfig(args []string) ServerConfig {
 	hashKey := HashConfig{
 		Key: emptyString,
 	}
+	auditFile := AuditFile{}
+	auditURL := AuditURL{}
+
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
 	fileStoragePath := flagSet.String("f", defaultFileStoragePath, "path to a file to store data")
 	restore := flagSet.Bool("r", defaultRestore, "should restore data")
 	database := flagSet.String("d", "", "A DB connection string")
-
+	flagSet.Var(&auditFile, "audit-file", "--audit-file=<path to an audit log file>")
+	flagSet.Var(&auditURL, "audit-url", "--audit-url=<URL to an audit log service>")
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
 	}
@@ -131,6 +162,14 @@ func LoadServerConfig(args []string) ServerConfig {
 		hashKey.Set(val)
 		log.Info().Str("KEY", val).Send()
 	}
+	if val, ok := os.LookupEnv("AUDIT_FILE"); ok {
+		auditFile.Set(val)
+		log.Info().Str("AUDIT_FILE", val).Send()
+	}
+	if val, ok := os.LookupEnv("AUDIT_URL"); ok {
+		auditURL.Set(val)
+		log.Info().Str("AUDIT_URL", val).Send()
+	}
 
 	return ServerConfig{
 		SocketConfig: socket,
@@ -141,6 +180,10 @@ func LoadServerConfig(args []string) ServerConfig {
 			DBConnStr:       *database,
 		},
 		HashConfig: hashKey,
+		AuditConfig: AuditConfig{
+			auditFile: auditFile,
+			auditURL:  auditURL,
+		},
 	}
 }
 
