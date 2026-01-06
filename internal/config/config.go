@@ -80,17 +80,9 @@ func (a *Audit) Set(flagVal string) error {
 	return nil
 }
 
-type AuditFile struct {
-	Audit
-}
-
-type AuditURL struct {
-	Audit
-}
-
 type AuditConfig struct {
-	auditFile AuditFile
-	auditURL  AuditURL
+	auditFile Audit
+	auditURL  Audit
 }
 
 type StoreConfig struct {
@@ -117,8 +109,8 @@ func LoadServerConfig(args []string) ServerConfig {
 	hashKey := HashConfig{
 		Key: emptyString,
 	}
-	auditFile := AuditFile{}
-	auditURL := AuditURL{}
+	auditFile := Audit{}
+	auditURL := Audit{}
 
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
