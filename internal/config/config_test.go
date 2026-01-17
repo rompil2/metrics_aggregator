@@ -91,8 +91,8 @@ func TestServerConfig(t *testing.T) {
 					Port: 9092,
 				},
 				AuditConfig: AuditConfig{
-					auditFile: Audit{"audit_file.txt"},
-					auditURL:  Audit{"http://localhost:8787"},
+					AuditFile: Audit{"audit_file.txt"},
+					AuditURL:  Audit{"http://localhost:8787"},
 				},
 			},
 		},
@@ -118,8 +118,8 @@ func TestServerConfig(t *testing.T) {
 					Port: 8123,
 				},
 				AuditConfig: AuditConfig{
-					auditFile: Audit{"audit_file.txt"},
-					auditURL:  Audit{"http://localhost:8787"},
+					AuditFile: Audit{"audit_file.txt"},
+					AuditURL:  Audit{"http://localhost:8787"},
 				},
 			},
 		},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/rompil2/metrics_aggregator/internal/audit"
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 	"github.com/rompil2/metrics_aggregator/internal/service"
@@ -31,7 +32,7 @@ type HandlerMux struct {
 	tmpl    *template.Template
 }
 
-func NewHandlerMux(service Service, tmpl *template.Template, key string) *HandlerMux {
+func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string) *HandlerMux {
 
 	h := &HandlerMux{
 		Service: service,
@@ -51,6 +52,8 @@ func NewHandlerMux(service Service, tmpl *template.Template, key string) *Handle
 		h.Use(MiddlewareCheckHash(key))
 		h.Use(MiddlewareSetHash(key))
 	}
+	manager := audit.InitializeAuditManager(auditFilePath, auditURL)
+	h.Use(audit.AuditMiddleware(manager))
 
 	h.Get("/", h.HomePage)
 	h.Get("/ping", h.Ping)
@@ -112,6 +115,9 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := audit.WithAuditMetrics(r.Context(), []string{ID})
+	*r = *r.Clone(ctx) // Обновляем запрос с новым контекстом
+
 	if err := h.Service.UpdateMetrics(&metricsModel); err != nil {
 		// If error is "Unknown metrics ID, created the new one" - then it's a new metrics
 		if strings.Contains(err.Error(), "created the new one") {
@@ -143,6 +149,9 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := audit.WithAuditMetrics(r.Context(), []string{metricsModel.ID})
+	*r = *r.Clone(ctx) // Обновляем запрос с новым контекстом
+
 	err := h.Service.UpdateMetrics(&metricsModel)
 	if err != nil {
 		h.handleUpdateError(w, err, metricsModel.ID, log)
@@ -167,13 +176,19 @@ func (h *HandlerMux) UpdatesWithJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Validate MetricModel
+	var ids []string
 	for _, metricsModel := range metricsModels {
 		if err := validateMetricsUpdate(&metricsModel); err != nil {
 			log.Error().Err(err).Msg("validation failed")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		ids = append(ids, metricsModel.ID)
 	}
+
+	ctx := audit.WithAuditMetrics(r.Context(), ids)
+	*r = *r.Clone(ctx) // Обновляем запрос с новым контекстом
+
 	err := h.Service.UpdateAllMetrics(metricsModels)
 	if err != nil {
 		h.handleUpdateError(w, err, "All metrics", log)

@@ -81,8 +81,8 @@ func (a *Audit) Set(flagVal string) error {
 }
 
 type AuditConfig struct {
-	auditFile Audit
-	auditURL  Audit
+	AuditFile Audit
+	AuditURL  Audit
 }
 
 type StoreConfig struct {
@@ -173,8 +173,8 @@ func LoadServerConfig(args []string) ServerConfig {
 		},
 		HashConfig: hashKey,
 		AuditConfig: AuditConfig{
-			auditFile: auditFile,
-			auditURL:  auditURL,
+			AuditFile: auditFile,
+			AuditURL:  auditURL,
 		},
 	}
 }
