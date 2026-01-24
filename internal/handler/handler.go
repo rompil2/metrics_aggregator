@@ -43,15 +43,15 @@ func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath,
 	h.Use(middleware.RealIP)
 	// h.Use(middleware.Compress(1, "text/html", "application/json"))
 	h.Use(MiddlewareRequestUnzip)
-	h.Use(MiddlewareResponseZip)
-	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
-
-	h.Use(NaiveLoggerMiddleware)
-	h.Use(middleware.Recoverer)
 	if key != "" {
 		h.Use(MiddlewareCheckHash(key))
 		h.Use(MiddlewareSetHash(key))
 	}
+	h.Use(NaiveLoggerMiddleware)
+	h.Use(MiddlewareResponseZip)
+	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
+	h.Use(middleware.Recoverer)
+
 	manager := audit.InitializeAuditManager(auditFilePath, auditURL)
 	h.Use(audit.AuditMiddleware(manager))
 
@@ -63,6 +63,7 @@ func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath,
 	h.Post("/value/", h.GetMetricsJSON)
 	h.Get("/value/{mtype}/{id}", h.GetMetrics)
 
+	h.Mount("/debug", middleware.Profiler())
 	return h
 }
 
