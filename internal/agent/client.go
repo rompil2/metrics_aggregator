@@ -70,6 +70,7 @@ func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEn
 		},
 		batchEnabled: batchEnabled,
 		hasher:       nil,
+		rateLimit:    rateLimit,
 	}
 }
 
