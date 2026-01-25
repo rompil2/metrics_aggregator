@@ -9,219 +9,319 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 )
 
-// берём структуру для хранения сведений об ответе
+// --- POOLS ---
+
+var (
+	bufferPool = sync.Pool{
+		New: func() interface{} {
+			return &bytes.Buffer{}
+		},
+	}
+
+	gzipWriterPool = sync.Pool{
+		New: func() interface{} {
+			return gzip.NewWriter(io.Discard)
+		},
+	}
+)
+
+func getBuffer() *bytes.Buffer {
+	return bufferPool.Get().(*bytes.Buffer)
+}
+
+func putBuffer(b *bytes.Buffer) {
+	if b != nil {
+		b.Reset()
+		bufferPool.Put(b)
+	}
+}
+
+// --- LOGGING MIDDLEWARE ---
+
 type responseData struct {
 	status int
 	size   int
 }
 
-// добавляем реализацию http.ResponseWriter
 type loggingResponseWriter struct {
-	http.ResponseWriter  // встраиваем оригинальный http.ResponseWriter
+	http.ResponseWriter
 	responseData         *responseData
 	statusHasBeenChanged bool
 }
 
 func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
-	// записываем ответ, используя оригинальный http.ResponseWriter
-	// Оказалось, что, порой, метод WriteHeader может вообще не вызываться
-	// и это интерпретируется как статус-код 200
-	// Хотя и метод Write может быть не вызванн и тоже это 200, Ок.
 	if !lrw.statusHasBeenChanged {
 		lrw.responseData.status = http.StatusOK
 	}
-	size, err := lrw.ResponseWriter.Write(b)
-	lrw.responseData.size += size // захватываем размер
-	return size, err
+	n, err := lrw.ResponseWriter.Write(b)
+	lrw.responseData.size += n
+	return n, err
 }
 
 func (lrw *loggingResponseWriter) WriteHeader(statusCode int) {
-	// записываем код статуса, используя оригинальный http.ResponseWriter
 	if lrw.statusHasBeenChanged {
-		return // Уже был вызван, избегаем дублирования
+		return
 	}
 	lrw.ResponseWriter.WriteHeader(statusCode)
-	lrw.responseData.status = statusCode // захватываем код статуса
+	lrw.responseData.status = statusCode
 	lrw.statusHasBeenChanged = true
 }
 
 func NaiveLoggerMiddleware(next http.Handler) http.Handler {
-	NaiveLogger := func(w http.ResponseWriter, r *http.Request) {
-
-		responseData := &responseData{
-			status: 0,
-			size:   0,
-		}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log := logger.Get()
-		lw := loggingResponseWriter{
-			ResponseWriter: w, // встраиваем оригинальный http.ResponseWriter
-			responseData:   responseData,
+		ctx := logger.WithLogger(r.Context(), log)
+		rd := &responseData{status: 0, size: 0}
+		lrw := &loggingResponseWriter{
+			ResponseWriter:       w,
+			responseData:         rd,
+			statusHasBeenChanged: false,
 		}
 
 		start := time.Now()
-		ctx := logger.WithLogger(r.Context(), log)
-		next.ServeHTTP(&lw, r.WithContext(ctx))
-
+		next.ServeHTTP(lrw, r.WithContext(ctx))
 		duration := time.Since(start)
 
 		log.Info().
 			Str("uri", r.RequestURI).
 			Str("method", r.Method).
 			Dur("duration", duration).
-			Int("status", lw.responseData.status). // получаем перехваченный код статуса ответа
-			Int("size", lw.responseData.size).     // получаем перехваченный размер ответа
+			Int("status", rd.status).
+			Int("size", rd.size).
 			Send()
+	})
+}
 
-	}
-	return http.HandlerFunc(NaiveLogger)
+// --- REQUEST UNZIP MIDDLEWARE ---
+
+type pooledGzipReader struct {
+	*gzip.Reader
+	pool *sync.Pool
+}
+
+func (pgr *pooledGzipReader) Close() error {
+	err := pgr.Reader.Close()
+	pgr.pool.Put(pgr.Reader)
+	return err
 }
 
 func MiddlewareRequestUnzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
-			gz, err := gzip.NewReader(r.Body)
-			if err != nil {
-				http.Error(w, "Invalid gzip body", http.StatusBadRequest)
-				return
-			}
-			defer gz.Close()
-
-			// Заменяем тело запроса на распакованное
-			r.Body = gz
-			r.Header.Del("Content-Length")
+		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
 		}
+
+		// Create a new reader — don't use pool for simplicity and safety
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			http.Error(w, "Invalid gzip body", http.StatusBadRequest)
+			return
+		}
+		defer gr.Close()
+
+		// Replace request body
+		r.Body = gr
+		r.Header.Del("Content-Length")
 		next.ServeHTTP(w, r)
 	})
 }
+
+// --- HASH CHECK MIDDLEWARE ---
+
 func MiddlewareCheckHash(key string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if hash := r.Header.Get("HashSHA256"); hash != "" {
-				// Create a tee reader to compute hash while preserving the body
-				var bodyBuffer bytes.Buffer
-				tee := io.TeeReader(r.Body, &bodyBuffer)
-
-				// Compute hash
-				h := hmac.New(sha256.New, []byte(key))
-				if _, err := io.Copy(h, tee); err != nil {
-					http.Error(w, "Error computing hash", http.StatusInternalServerError)
-					return
-				}
-
-				// Replace the body for subsequent handlers
-				r.Body.Close()
-				r.Body = io.NopCloser(&bodyBuffer)
-
-				// Compare hashes
-				serverHash := hex.EncodeToString(h.Sum(nil))
-				if !hmac.Equal([]byte(serverHash), []byte(hash)) {
-					// hashes are not equal, send error
-					http.Error(w, "Invalid hash", http.StatusBadRequest)
-					return
-				}
+			hash := r.Header.Get("HashSHA256")
+			if hash == "" {
+				next.ServeHTTP(w, r)
+				return
 			}
 
-			// Continue to next handler
+			bodyBuf := getBuffer()
+			defer putBuffer(bodyBuf)
+
+			tee := io.TeeReader(r.Body, bodyBuf)
+			h := hmac.New(sha256.New, []byte(key))
+			if _, err := io.Copy(h, tee); err != nil {
+				http.Error(w, "Error computing hash", http.StatusInternalServerError)
+				return
+			}
+
+			r.Body.Close()
+			r.Body = io.NopCloser(bodyBuf)
+
+			serverHash := hex.EncodeToString(h.Sum(nil))
+			if !hmac.Equal([]byte(serverHash), []byte(hash)) {
+				http.Error(w, "Invalid hash", http.StatusBadRequest)
+				return
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// The Middleware takes a key and response body to calculate the hash and put it in the header
+// --- HASH SET MIDDLEWARE ---
+
 func MiddlewareSetHash(key string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Get hash of a response body
-			hw := newWriterSubstituter(w)
-			next.ServeHTTP(hw, r)
-			// if no error in the response than we can calculate hash
-			if hw.buf.Len() > 0 {
-				h := hmac.New(sha256.New, []byte(key))
-				if _, err := h.Write(hw.buf.Bytes()); err != nil {
-					http.Error(w, "Error computing hash", http.StatusInternalServerError)
-					return
-				}
-				hash := hex.EncodeToString(h.Sum(nil))
-				w.Header().Set("HashSHA256", hash)
-				w.Write(hw.buf.Bytes())
+			cw := newCapturingResponseWriter(w)
+			defer cw.releaseBuffer()
+
+			next.ServeHTTP(cw, r)
+
+			if cw.buf.Len() == 0 {
+				return
 			}
+
+			h := hmac.New(sha256.New, []byte(key))
+			if _, err := h.Write(cw.buf.Bytes()); err != nil {
+				http.Error(w, "Error computing hash", http.StatusInternalServerError)
+				return
+			}
+
+			hash := hex.EncodeToString(h.Sum(nil))
+			w.Header().Set("HashSHA256", hash)
+
+			status := cw.statusCode
+			if status == 0 {
+				status = http.StatusOK
+			}
+			w.WriteHeader(status)
+			w.Write(cw.buf.Bytes())
 		})
 	}
 }
 
+// --- RESPONSE ZIP MIDDLEWARE ---
+
 func MiddlewareResponseZip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cw := newWriterSubstituter(w)
+		clientSupportsGzip := supportsGzip(r)
+
+		cw := newCapturingResponseWriter(w)
+		defer cw.releaseBuffer()
+
 		next.ServeHTTP(cw, r)
-		doesClientSupportGZIP := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
-		if doesClientSupportGZIP && shouldCompress(cw.Header().Get("Content-Type")) {
-			if cw.buf.Len() > 0 {
-				w.Header().Set("Content-encoding", "gzip")
-				w.Header().Del("Content-Length")
-				gz := gzip.NewWriter(w)
-				defer gz.Close()
-				_, err := gz.Write(cw.buf.Bytes())
-				if err != nil {
-					http.Error(w, "Error compressing response", http.StatusInternalServerError)
-				} else {
-					err := gz.Flush()
-					if err != nil {
-						http.Error(w, "Error flushing response", http.StatusInternalServerError)
-					}
-				}
-			}
-		} else {
-			// send body as is
-			w.Header().Del("Content-Length")
-			_, err := w.Write((cw.buf.Bytes()))
-			if err != nil {
-				http.Error(w, "Error sending response", http.StatusInternalServerError)
-			}
+
+		contentType := cw.Header().Get("Content-Type")
+		shouldCompress := clientSupportsGzip && isCompressible(contentType)
+
+		w.Header().Add("Vary", "Accept-Encoding")
+
+		status := cw.statusCode
+		if status == 0 {
+			status = http.StatusOK
 		}
 
+		if shouldCompress && cw.buf.Len() > 0 {
+			w.Header().Del("Content-Length")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(status)
+
+			gz := gzipWriterPool.Get().(*gzip.Writer)
+			gz.Reset(w)
+			defer func() {
+				gz.Close()
+				gzipWriterPool.Put(gz)
+			}()
+
+			if _, err := gz.Write(cw.buf.Bytes()); err != nil {
+				return // can't recover after headers sent
+			}
+			gz.Flush()
+		} else {
+			w.Header().Del("Content-Length")
+			w.WriteHeader(status)
+			if _, err := w.Write(cw.buf.Bytes()); err != nil {
+				return
+			}
+		}
 	})
 }
 
-// Checks If the type good for compressing
-func shouldCompress(contentType string) bool {
-	compressibleTypes := []string{
-		"text/html",
-		"application/json",
-	}
+// --- HELPER FUNCTIONS ---
 
-	for _, t := range compressibleTypes {
-		if strings.HasPrefix(contentType, t) {
+func supportsGzip(r *http.Request) bool {
+	encodings := strings.Split(r.Header.Get("Accept-Encoding"), ",")
+	for _, part := range encodings {
+		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
+		if encoding == "gzip" {
 			return true
 		}
 	}
 	return false
 }
 
-type WriterSubstituter struct {
-	w   http.ResponseWriter
-	buf *bytes.Buffer
-}
+func isCompressible(contentType string) bool {
+	if i := strings.Index(contentType, ";"); i >= 0 {
+		contentType = contentType[:i]
+	}
+	contentType = strings.TrimSpace(strings.ToLower(contentType))
 
-func newWriterSubstituter(w http.ResponseWriter) *WriterSubstituter {
-	return &WriterSubstituter{
-		w:   w,
-		buf: bytes.NewBuffer([]byte{}),
+	switch contentType {
+	case
+		"text/html",
+		"text/plain",
+		"text/css",
+		"text/javascript",
+		"text/xml",
+		"application/json",
+		"application/xml",
+		"application/javascript",
+		"application/xhtml+xml",
+		"application/rss+xml",
+		"application/atom+xml":
+		return true
+	default:
+		return false
 	}
 }
 
-func (c *WriterSubstituter) Header() http.Header {
-	return c.w.Header()
+// --- CAPTURING RESPONSE WRITER ---
+
+type capturingResponseWriter struct {
+	w           http.ResponseWriter
+	buf         *bytes.Buffer
+	statusCode  int
+	wroteHeader bool
 }
 
-func (c *WriterSubstituter) Write(p []byte) (int, error) {
-	return c.buf.Write(p)
+func newCapturingResponseWriter(w http.ResponseWriter) *capturingResponseWriter {
+	return &capturingResponseWriter{
+		w:   w,
+		buf: getBuffer(),
+	}
 }
 
-func (c *WriterSubstituter) WriteHeader(statusCode int) {
-	c.w.WriteHeader(statusCode)
+func (cw *capturingResponseWriter) Header() http.Header {
+	return cw.w.Header()
+}
+
+func (cw *capturingResponseWriter) Write(data []byte) (int, error) {
+	if !cw.wroteHeader {
+		cw.statusCode = http.StatusOK
+		cw.wroteHeader = true
+	}
+	return cw.buf.Write(data)
+}
+
+func (cw *capturingResponseWriter) WriteHeader(statusCode int) {
+	if !cw.wroteHeader {
+		cw.statusCode = statusCode
+		cw.wroteHeader = true
+	}
+}
+
+func (cw *capturingResponseWriter) releaseBuffer() {
+	putBuffer(cw.buf)
+	cw.buf = nil
 }

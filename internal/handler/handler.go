@@ -45,11 +45,13 @@ func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath,
 	h.Use(MiddlewareRequestUnzip)
 	if key != "" {
 		h.Use(MiddlewareCheckHash(key))
-		h.Use(MiddlewareSetHash(key))
 	}
 	h.Use(NaiveLoggerMiddleware)
 	h.Use(MiddlewareResponseZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
+	if key != "" {
+		h.Use(MiddlewareSetHash(key))
+	}
 	h.Use(middleware.Recoverer)
 
 	manager := audit.InitializeAuditManager(auditFilePath, auditURL)
