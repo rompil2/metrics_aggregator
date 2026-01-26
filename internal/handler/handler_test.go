@@ -109,7 +109,10 @@ func TestHandlerMux_UpdatePost(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHandlerMux(mockService, nil, "", "", "")
 			if !tt.wantErr {
-				mockService.EXPECT().UpdateMetrics(gomock.Any()).Return(fmt.Errorf("Unknown metrics ID, created the new one")).Times(1)
+				mockService.EXPECT().
+					UpdateMetrics(gomock.Any()).
+					Return(fmt.Errorf("Unknown metrics ID, created the new one")).
+					Times(1)
 			}
 			r := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -153,7 +156,10 @@ func TestHandlerMux_ValueGet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHandlerMux(mockService, nil, "", "", "")
 			if tt.wantErr {
-				mockService.EXPECT().GetMetrics(gomock.Any()).Return(model.Metrics{}, fmt.Errorf("unknown metrics ID")).MinTimes(0)
+				mockService.EXPECT().
+					GetMetrics(gomock.Any()).
+					Return(model.Metrics{}, fmt.Errorf("unknown metrics ID")).
+					MinTimes(0)
 			} else {
 				mockService.EXPECT().GetMetrics(gomock.Any()).Return(testMetrics, nil).Times(1)
 			}

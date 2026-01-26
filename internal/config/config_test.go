@@ -79,7 +79,19 @@ func TestServerConfig(t *testing.T) {
 		{
 			name:    "values from flags",
 			envVars: map[string]string{},
-			flags:   []string{"-a", "127.0.0.1:9092", "-i", "20", "-f", "temp.tmp", "-r", "-audit-file", "audit_file.txt", "-audit-url", "http://localhost:8787"},
+			flags: []string{
+				"-a",
+				"127.0.0.1:9092",
+				"-i",
+				"20",
+				"-f",
+				"temp.tmp",
+				"-r",
+				"-audit-file",
+				"audit_file.txt",
+				"-audit-url",
+				"http://localhost:8787",
+			},
 			expectedConfig: ServerConfig{
 				StoreConfig: StoreConfig{
 					StoreInterval:   20 * time.Second,

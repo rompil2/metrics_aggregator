@@ -46,7 +46,14 @@ type HTTPClient struct {
 	rateLimit      uint
 }
 
-func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string, rateLimit uint) *HTTPClient {
+func NewHTTPClient(
+	reportInterval time.Duration,
+	host string,
+	port uint,
+	batchEnabled bool,
+	hashKey string,
+	rateLimit uint,
+) *HTTPClient {
 	if hashKey != "" {
 		key := []byte(hashKey)
 		hash := hmac.New(sha256.New, key)

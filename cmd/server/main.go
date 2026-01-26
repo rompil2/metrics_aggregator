@@ -60,7 +60,13 @@ func main() {
 	}
 
 	srvc := service.NewMetricService(repo)
-	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles(PATH_TO_TEMPLATE)), cfg.HashConfig.String(), cfg.AuditFile.String(), cfg.AuditURL.String())
+	handler := handler.NewHandlerMux(
+		srvc,
+		template.Must(template.ParseFiles(PATH_TO_TEMPLATE)),
+		cfg.HashConfig.String(),
+		cfg.AuditFile.String(),
+		cfg.AuditURL.String(),
+	)
 	server := &http.Server{
 		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,
