@@ -1,3 +1,4 @@
+// path: internal/audit/middleware.go
 package audit
 
 import (
@@ -14,11 +15,14 @@ type contextKey string
 
 const auditMetricsKey contextKey = "audit_metrics"
 
-// Внутри пакета audit
+// WithAuditMetrics associates a list of metric IDs with the given context for audit logging purposes.
+// The stored IDs are later used by AuditMiddleware to generate audit events for successful metric operations.
 func WithAuditMetrics(ctx context.Context, metricIDs []string) context.Context {
 	return context.WithValue(ctx, auditMetricsKey, metricIDs)
 }
 
+// GetAuditMetrics retrieves the list of metric IDs from the context that were marked for auditing.
+// Returns nil if no metrics were associated with the context.
 func GetAuditMetrics(ctx context.Context) []string {
 	if val := ctx.Value(auditMetricsKey); val != nil {
 		if ids, ok := val.([]string); ok {
@@ -28,7 +32,8 @@ func GetAuditMetrics(ctx context.Context) []string {
 	return nil
 }
 
-// GetClientIP extracts the client IP address from the request
+// GetClientIP extracts the client IP address from the request,
+// respecting X-Forwarded-For and X-Real-IP headers before falling back to RemoteAddr.
 func GetClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header
 	forwarded := r.Header.Get("X-Forwarded-For")
@@ -49,6 +54,9 @@ func GetClientIP(r *http.Request) string {
 	return ip
 }
 
+// AuditMiddleware creates a middleware that logs successful metric update operations to all configured audit sinks.
+// It captures metric IDs from the request context (via WithAuditMetrics), client IP, and timestamp,
+// and sends an audit event only for 2xx responses on known metrics endpoints (/update/, /updates/, etc.).
 func AuditMiddleware(manager *AuditManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +99,8 @@ func isMetricsEndpoint(path string) bool {
 	return false
 }
 
-// InitializeAuditManager creates an AuditManager based on configuration
+// InitializeAuditManager creates and configures an AuditManager with file and/or HTTP audit observers
+// based on the provided audit file path and audit URL. If both are empty, returns a manager with no observers.
 func InitializeAuditManager(auditFile, auditURL string) *AuditManager {
 
 	var observers []AuditObserver

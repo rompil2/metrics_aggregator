@@ -56,10 +56,12 @@ var retriableErrorCodes = map[string]bool{
 	pgerrcode.SQLClientUnableToEstablishSQLConnection: true,
 }
 
+// DBStore represents a PostgreSQL-backed metrics repository with built-in retry logic for transient database errors.
 type DBStore struct {
 	db *sql.DB
 }
 
+// NewDBStore creates and initializes a new DBStore instance by validating the database connection and applying pending migrations.
 func NewDBStore(db *sql.DB) (DBStore, error) {
 	dbs := DBStore{db}
 	// Check connection
@@ -72,7 +74,7 @@ func NewDBStore(db *sql.DB) (DBStore, error) {
 	return dbs, nil
 }
 
-// SetAllMetrics updates multiple metrics in a single transaction with batch processing
+// SetAllMetrics updates multiple metrics in a single atomic transaction, supporting both counter and gauge types with input validation.
 func (s DBStore) SetAllMetrics(metrics []model.Metrics) error {
 	return s.withRetry(func() error {
 		if len(metrics) == 0 {
@@ -135,10 +137,12 @@ func (s DBStore) SetAllMetrics(metrics []model.Metrics) error {
 	})
 }
 
+// Ping checks the availability of the database connection and retries on transient failures.
 func (s DBStore) Ping() error {
 	return s.withRetry(s.db.Ping)
 }
 
+// SetMetrics stores or updates a single metric in the database, handling counters and gauges with appropriate SQL queries.
 func (s DBStore) SetMetrics(ID string, metric model.Metrics) error {
 	return s.withRetry(func() error {
 		if metric.MType == "counter" && metric.Delta != nil {
@@ -153,6 +157,7 @@ func (s DBStore) SetMetrics(ID string, metric model.Metrics) error {
 	})
 }
 
+// GetMetrics retrieves a metric by its ID from the database, returning an error if not found or on database failure.
 func (s DBStore) GetMetrics(metricID string) (model.Metrics, error) {
 	var result model.Metrics
 	err := s.withRetry(func() error {
@@ -196,6 +201,7 @@ func (s DBStore) getMetricsInternal(metricID string) (model.Metrics, error) {
 	return metric, nil
 }
 
+// GetAllMetrics fetches all stored metrics from the database, ordered by most recently updated.
 func (s DBStore) GetAllMetrics() ([]model.Metrics, error) {
 	var result []model.Metrics
 	err := s.withRetry(func() error {
@@ -307,6 +313,7 @@ func (s DBStore) isRetriableError(err error) bool {
 	return false
 }
 
+// Migrate applies all pending database schema migrations using the goose framework and embedded migration files.
 func (s DBStore) Migrate() error {
 	files, err := migrations.GetMigrationFiles()
 	if err != nil {
@@ -326,6 +333,7 @@ func (s DBStore) Migrate() error {
 	return nil
 }
 
+// Close terminates the underlying database connection and releases associated resources.
 func (s DBStore) Close() error {
 	return s.db.Close()
 }

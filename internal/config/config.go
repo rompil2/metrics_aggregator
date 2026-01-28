@@ -1,3 +1,4 @@
+// path: internal/config
 package config
 
 import (
@@ -26,6 +27,7 @@ const (
 	emptyString            = ""
 )
 
+// SocketConfig represents a network address configuration with host and port.
 type SocketConfig struct {
 	Host string
 	Port uint
@@ -54,6 +56,7 @@ func (s *SocketConfig) Set(flagVal string) error {
 	return nil
 }
 
+// HashConfig holds the secret key used for HMAC-based request/response integrity verification.
 type HashConfig struct {
 	Key string
 }
@@ -67,6 +70,7 @@ func (h *HashConfig) Set(flagVal string) error {
 	return nil
 }
 
+// Audit represents an audit sink configuration (either file path or URL).
 type Audit struct {
 	auditSink string
 }
@@ -80,11 +84,14 @@ func (a *Audit) Set(flagVal string) error {
 	return nil
 }
 
+// AuditConfig groups audit logging destinations for file and HTTP endpoints.
 type AuditConfig struct {
 	AuditFile Audit
 	AuditURL  Audit
 }
 
+// StoreConfig defines persistent storage settings for metrics data,
+// including file path, restore behavior, and database connection string.
 type StoreConfig struct {
 	StoreInterval   time.Duration
 	FileStoragePath string
@@ -92,6 +99,8 @@ type StoreConfig struct {
 	DBConnStr       string
 }
 
+// ServerConfig combines all configuration parameters required to run the metrics server,
+// including network, storage, security (hashing), and auditing options.
 type ServerConfig struct {
 	SocketConfig
 	StoreConfig
@@ -99,6 +108,9 @@ type ServerConfig struct {
 	AuditConfig
 }
 
+// LoadServerConfig parses command-line flags and environment variables to build a ServerConfig.
+// It supports both CLI flags (e.g., -a, -k, -f) and corresponding environment variables (e.g., ADDRESS, KEY).
+// Environment variables take precedence over CLI defaults but not over explicit CLI arguments.
 func LoadServerConfig(args []string) ServerConfig {
 	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
 
@@ -179,6 +191,8 @@ func LoadServerConfig(args []string) ServerConfig {
 	}
 }
 
+// AgentConfig contains all settings needed for the metrics collection agent,
+// including server address, polling/reporting intervals, rate limiting, and hashing key.
 type AgentConfig struct {
 	SocketConfig
 	HashConfig
@@ -187,6 +201,9 @@ type AgentConfig struct {
 	RateLimit      uint
 }
 
+// LoadAgentConfig parses command-line arguments and environment variables to construct an AgentConfig.
+// It supports flags like -a (address), -k (hash key), -p (poll interval), -r (report interval),
+// and corresponding environment variables (ADDRESS, KEY, POLL_INTERVAL, etc.).
 func LoadAgentConfig(args []string) AgentConfig {
 	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
 
