@@ -1,15 +1,15 @@
+// path: internal/model
 package model
 
-const (
-	Counter = "counter"
-	Gauge   = "gauge"
-)
+// Counter represents the metric type for monotonically increasing integer counters.
+const Counter = "counter"
 
-// NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
-// Органичиваясь плоской моделью.
-// Delta и Value объявлены через указатели,
-// что бы отличать значение "0", от не заданного значения
-// и соответственно не кодировать в структуру.
+// Gauge represents the metric type for arbitrary floating-point values that can increase or decrease.
+const Gauge = "gauge"
+
+// Metrics represents a single metric entity with an ID, type, and value.
+// It supports two types: "counter" (with Delta as *int64) and "gauge" (with Value as *float64).
+// The Hash field is used for integrity validation in distributed scenarios.
 type Metrics struct {
 	ID    string   `json:"id"`
 	MType string   `json:"type"`
