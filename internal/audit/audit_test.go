@@ -259,24 +259,33 @@ func TestAuditMiddleware_Success(t *testing.T) {
 
 }
 
-// TestAuditMiddleware_Failure не вызывает аудит при ошибке
+// TestAuditMiddleware_Failure ensures that no audit event is generated for failed requests (non-2xx status codes).
 func TestAuditMiddleware_Failure(t *testing.T) {
-	var capturedEvent *AuditEvent
-	manager := NewAuditManager([]AuditObserver{})
+	// Use a mock observer to capture whether Notify was called
+	var notified bool
+	mockObserver := &mockAuditObserver{
+		notifyFunc: func(ctx context.Context, event *AuditEvent) error {
+			notified = true
+			return nil
+		},
+	}
+
+	manager := NewAuditManager([]AuditObserver{mockObserver})
 	middleware := AuditMiddleware(manager)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := WithAuditMetrics(r.Context(), []string{"MetricB"})
 		*r = *r.Clone(ctx)
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError) // 500 → failure
 	})
 
 	req := httptest.NewRequest("POST", "/update/", nil)
 	rr := httptest.NewRecorder()
+
 	middleware(handler).ServeHTTP(rr, req)
 
-	if capturedEvent != nil {
-		t.Errorf("unexpected audit event on failure: %+v", capturedEvent)
+	if notified {
+		t.Error("expected no audit notification for failed request, but one was sent")
 	}
 }
 
@@ -289,4 +298,15 @@ func (m *mockManager) NotifyAll(ctx context.Context, event *AuditEvent) {
 	if m.capture != nil {
 		m.capture(event)
 	}
+}
+
+type mockAuditObserver struct {
+	notifyFunc func(context.Context, *AuditEvent) error
+}
+
+func (m *mockAuditObserver) Notify(ctx context.Context, event *AuditEvent) error {
+	if m.notifyFunc != nil {
+		return m.notifyFunc(ctx, event)
+	}
+	return nil
 }
