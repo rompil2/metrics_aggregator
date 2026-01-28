@@ -1,3 +1,4 @@
+// path: internal/audit/file_observer.go
 package audit
 
 import (
@@ -8,20 +9,24 @@ import (
 	"sync"
 )
 
-// FileAuditObserver handles audit events by writing to a file
+// FileAuditObserver handles audit events by appending them as JSON lines to a specified file.
+// It is safe for concurrent use and ensures atomic writes per event using a mutex.
 type FileAuditObserver struct {
 	filePath string
 	mutex    sync.Mutex
 }
 
-// NewFileAuditObserver creates a new FileAuditObserver
+// NewFileAuditObserver creates a new FileAuditObserver that writes audit events to the given file path.
+// The file will be created if it does not exist, and events are appended as newline-delimited JSON records.
 func NewFileAuditObserver(filePath string) *FileAuditObserver {
 	return &FileAuditObserver{
 		filePath: filePath,
 	}
 }
 
-// Notify writes the audit event to the file
+// Notify appends the provided audit event as a JSON-encoded line to the configured file.
+// It uses a mutex to ensure thread-safe access to the file and handles file opening/closing on each call.
+// Returns an error if file operations or JSON marshaling fail.
 func (f *FileAuditObserver) Notify(ctx context.Context, event *AuditEvent) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()

@@ -1,3 +1,4 @@
+// path: internal/audit/manager.go
 package audit
 
 import (
@@ -6,24 +7,28 @@ import (
 	"sync"
 )
 
-// AuditManager manages audit observers
+// AuditManager manages a list of audit observers and broadcasts audit events to them concurrently.
 type AuditManager struct {
 	observers []AuditObserver
 }
 
-// NewAuditManager creates a new AuditManager
+// NewAuditManager creates a new AuditManager instance with the provided list of observers.
+// The manager will notify all observers in parallel when an audit event occurs.
 func NewAuditManager(observers []AuditObserver) *AuditManager {
 	return &AuditManager{
 		observers: observers,
 	}
 }
 
-// AddObserver adds a new observer
+// AddObserver appends a new audit observer to the manager's list.
+// This method is not thread-safe and should be called during initialization only.
 func (am *AuditManager) AddObserver(observer AuditObserver) {
 	am.observers = append(am.observers, observer)
 }
 
-// NotifyAll notifies all observers
+// NotifyAll sends the given audit event to all registered observers concurrently.
+// Errors from individual observers are logged but do not stop notification of others.
+// This method is safe to call from multiple goroutines.
 func (am *AuditManager) NotifyAll(ctx context.Context, event *AuditEvent) {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(am.observers))

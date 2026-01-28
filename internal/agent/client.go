@@ -1,3 +1,4 @@
+// path: internal/agent/client.go
 package agent
 
 import (
@@ -28,13 +29,17 @@ const (
 	batchUpdatePath = "/updates/" // Добавляем отдельный путь для batch обновлений
 )
 
+// Metrics represents a map of metric names to their current values, used for internal aggregation.
 type Metrics = map[string]any
 
+// JobMetrics encapsulates compressed metric data and its optional HMAC-SHA256 hash for secure transmission.
 type JobMetrics struct {
 	compressedData *bytes.Buffer
 	Hash           *string
 }
 
+// HTTPClient sends collected metrics to a remote server via HTTP,
+// supporting both individual and batch updates with optional gzip compression and request signing.
 type HTTPClient struct {
 	mu             sync.RWMutex
 	lastMetrics    Metrics
@@ -46,6 +51,9 @@ type HTTPClient struct {
 	rateLimit      uint
 }
 
+// NewHTTPClient creates a new HTTPClient configured with the given reporting interval, server address,
+// batch mode, HMAC key for request signing, and rate limit (number of concurrent workers).
+// If hashKey is non-empty, all requests will include a HashSHA256 header for integrity verification.
 func NewHTTPClient(
 	reportInterval time.Duration,
 	host string,
@@ -81,6 +89,9 @@ func NewHTTPClient(
 	}
 }
 
+// Run starts the metrics reporting loop, sending the latest collected metrics to the server
+// at each reporting interval. It reads metrics from the channel and respects context cancellation.
+// Errors during transmission are logged but do not stop the loop.
 func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	ticker := time.NewTicker(h.reportInterval)
 	defer ticker.Stop()
@@ -140,6 +151,9 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	}
 }
 
+// SendMetrics sends metrics individually using multiple concurrent workers (rate-limited).
+// Each metric is serialized, optionally hashed, compressed with gzip, and sent to the /update/ endpoint.
+// This method is used when rateLimit >= 2.
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 	var errs []error
 	var mu sync.Mutex
@@ -225,6 +239,9 @@ producerLoop:
 	return h.handleErrors(errs)
 }
 
+// SendMetricsBatch sends all metrics in a single JSON array request to the /updates/ endpoint.
+// It serializes the entire batch, optionally computes a single hash, compresses with gzip,
+// and sends it in one HTTP POST. This method is used when rateLimit < 2.
 func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) error {
 	// Создаем batch метрик
 	metricsBatch, errs := h.createMetricsBatch(metrics)
@@ -335,7 +352,7 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 		if resp.StatusCode >= http.StatusBadRequest {
 			lastErr = fmt.Errorf("server returned status: %d %s", resp.StatusCode, resp.Status)
 
-			// Check if status code is retriable (5xx errors are usually retriable)
+			// Check if status code is retriable
 			if !h.isRetriableStatusCode(resp.StatusCode) || attempt == maxAttempts-1 {
 				return lastErr
 			}
@@ -404,14 +421,20 @@ func (h *HTTPClient) handleErrors(errs []error) error {
 	return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errors.Join(errs...))
 }
 
-// Остальной код без изменений...
+// MetricProcessor defines an interface for converting raw metric values into structured model.Metrics
+// and serializing them to JSON bytes.
 type MetricProcessor interface {
 	CreateMetric(key string, value any) (model.Metrics, error)
 	MarshalMetric(metric model.Metrics) ([]byte, error)
 }
 
+// HTTPMetricProcessor implements MetricProcessor for HTTP-based metric transmission,
+// converting Go types (int64, float64) to counter or gauge metrics and marshaling to JSON.
 type HTTPMetricProcessor struct{}
 
+// CreateMetric converts a key-value pair into a typed model.Metrics instance,
+// mapping int64 to Counter (Delta) and float64 to Gauge (Value).
+// Returns an error for unsupported value types.
 func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics, error) {
 	var m model.Metrics
 	m.ID = key
@@ -430,6 +453,7 @@ func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics
 	return m, nil
 }
 
+// MarshalMetric serializes a model.Metrics instance to JSON bytes.
 func (p *HTTPMetricProcessor) MarshalMetric(metric model.Metrics) ([]byte, error) {
 	return json.Marshal(metric)
 }

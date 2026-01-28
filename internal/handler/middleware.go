@@ -1,3 +1,4 @@
+// path: internal/handler
 package handler
 
 import (
@@ -14,8 +15,6 @@ import (
 
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 )
-
-// --- POOLS ---
 
 var (
 	bufferPool = sync.Pool{
@@ -42,13 +41,13 @@ func putBuffer(b *bytes.Buffer) {
 	}
 }
 
-// --- LOGGING MIDDLEWARE ---
-
+// responseData holds HTTP response metadata captured during request handling.
 type responseData struct {
 	status int
 	size   int
 }
 
+// loggingResponseWriter wraps http.ResponseWriter to capture status code and response size.
 type loggingResponseWriter struct {
 	http.ResponseWriter
 	responseData         *responseData
@@ -73,6 +72,9 @@ func (lrw *loggingResponseWriter) WriteHeader(statusCode int) {
 	lrw.statusHasBeenChanged = true
 }
 
+// NaiveLoggerMiddleware logs HTTP request and response metadata including URI, method,
+// duration, status code, and response size. It captures the actual status code even if
+// WriteHeader is not explicitly called by the handler.
 func NaiveLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log := logger.Get()
@@ -98,19 +100,9 @@ func NaiveLoggerMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// --- REQUEST UNZIP MIDDLEWARE ---
-
-type pooledGzipReader struct {
-	*gzip.Reader
-	pool *sync.Pool
-}
-
-func (pgr *pooledGzipReader) Close() error {
-	err := pgr.Reader.Close()
-	pgr.pool.Put(pgr.Reader)
-	return err
-}
-
+// MiddlewareRequestUnzip decompresses gzipped HTTP request bodies when the
+// Content-Encoding header indicates gzip compression. It replaces the original
+// request body with a decompressed reader and removes the Content-Length header.
 func MiddlewareRequestUnzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
@@ -133,8 +125,9 @@ func MiddlewareRequestUnzip(next http.Handler) http.Handler {
 	})
 }
 
-// --- HASH CHECK MIDDLEWARE ---
-
+// MiddlewareCheckHash validates the integrity of the request body using an HMAC-SHA256 hash
+// provided in the HashSHA256 header. It recomputes the hash using the provided key and
+// compares it with the client-provided value. If hashes don't match, it returns a 400 error.
 func MiddlewareCheckHash(key string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,8 +161,9 @@ func MiddlewareCheckHash(key string) func(next http.Handler) http.Handler {
 	}
 }
 
-// --- HASH SET MIDDLEWARE ---
-
+// MiddlewareSetHash computes an HMAC-SHA256 hash of the response body and sets it
+// in the HashSHA256 response header. It requires capturing the full response body,
+// so it should be placed early in the middleware chain, before any streaming responses.
 func MiddlewareSetHash(key string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,8 +195,10 @@ func MiddlewareSetHash(key string) func(next http.Handler) http.Handler {
 	}
 }
 
-// --- RESPONSE ZIP MIDDLEWARE ---
-
+// MiddlewareResponseZip compresses HTTP responses with gzip encoding
+// when the client indicates support via the Accept-Encoding header and
+// the response Content-Type is compressible (e.g., JSON, HTML, plain text).
+// It automatically sets Content-Encoding: gzip and Vary: Accept-Encoding headers.
 func MiddlewareResponseZip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientSupportsGzip := supportsGzip(r)
@@ -248,8 +244,7 @@ func MiddlewareResponseZip(next http.Handler) http.Handler {
 	})
 }
 
-// --- HELPER FUNCTIONS ---
-
+// supportsGzip checks if the client explicitly accepts gzip encoding.
 func supportsGzip(r *http.Request) bool {
 	encodings := strings.Split(r.Header.Get("Accept-Encoding"), ",")
 	for _, part := range encodings {
@@ -261,6 +256,7 @@ func supportsGzip(r *http.Request) bool {
 	return false
 }
 
+// isCompressible returns true for text-based or structured compressible content types.
 func isCompressible(contentType string) bool {
 	if i := strings.Index(contentType, ";"); i >= 0 {
 		contentType = contentType[:i]
@@ -286,8 +282,7 @@ func isCompressible(contentType string) bool {
 	}
 }
 
-// --- CAPTURING RESPONSE WRITER ---
-
+// capturingResponseWriter captures status code, headers, and response body.
 type capturingResponseWriter struct {
 	w           http.ResponseWriter
 	buf         *bytes.Buffer
