@@ -41,14 +41,14 @@ type JobMetrics struct {
 // HTTPClient sends collected metrics to a remote server via HTTP,
 // supporting both individual and batch updates with optional gzip compression and request signing.
 type HTTPClient struct {
-	mu             sync.RWMutex
 	lastMetrics    Metrics
-	reportInterval time.Duration
-	socket         string
 	client         *http.Client
-	batchEnabled   bool
 	hasher         *hash.Hash
+	socket         string
+	reportInterval time.Duration
 	rateLimit      uint
+	mu             sync.RWMutex
+	batchEnabled   bool
 }
 
 // NewHTTPClient creates a new HTTPClient configured with the given reporting interval, server address,
@@ -207,7 +207,7 @@ producerLoop:
 		if h.hasher != nil {
 			mu.Lock()
 			(*h.hasher).Reset()
-			if _, err := (*h.hasher).Write(buf); err != nil {
+			if _, err = (*h.hasher).Write(buf); err != nil {
 				h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
 				mu.Unlock()
 				break
@@ -261,7 +261,7 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 	hashString := new(string)
 	if h.hasher != nil {
 		(*h.hasher).Reset()
-		if _, err := (*h.hasher).Write(jsonData); err != nil {
+		if _, err = (*h.hasher).Write(jsonData); err != nil {
 			return fmt.Errorf("hashing data: %w", err)
 		}
 		*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))

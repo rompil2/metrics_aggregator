@@ -93,19 +93,19 @@ type AuditConfig struct {
 // StoreConfig defines persistent storage settings for metrics data,
 // including file path, restore behavior, and database connection string.
 type StoreConfig struct {
-	StoreInterval   time.Duration
 	FileStoragePath string
-	Restore         bool
 	DBConnStr       string
+	StoreInterval   time.Duration
+	Restore         bool
 }
 
 // ServerConfig combines all configuration parameters required to run the metrics server,
 // including network, storage, security (hashing), and auditing options.
 type ServerConfig struct {
+	AuditConfig
+	HashConfig
 	SocketConfig
 	StoreConfig
-	HashConfig
-	AuditConfig
 }
 
 // LoadServerConfig parses command-line flags and environment variables to build a ServerConfig.
@@ -194,8 +194,8 @@ func LoadServerConfig(args []string) ServerConfig {
 // AgentConfig contains all settings needed for the metrics collection agent,
 // including server address, polling/reporting intervals, rate limiting, and hashing key.
 type AgentConfig struct {
-	SocketConfig
 	HashConfig
+	SocketConfig
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 	RateLimit      uint

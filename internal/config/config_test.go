@@ -36,11 +36,11 @@ func TestSocketConfig_String(t *testing.T) {
 	tests := []struct {
 		name string
 		Host string
-		Port uint
 		want string
+		Port uint
 	}{
 		// TODO: Add test cases.
-		{"Positive test", "localhost", 8081, "localhost:8081"},
+		{"Positive test", "localhost", "localhost:8081", 8081},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,10 +54,10 @@ func TestSocketConfig_String(t *testing.T) {
 
 func TestServerConfig(t *testing.T) {
 	tests := []struct {
-		name           string
 		envVars        map[string]string
-		flags          []string
 		expectedConfig ServerConfig
+		name           string
+		flags          []string
 	}{
 		{
 			name:    "default values",

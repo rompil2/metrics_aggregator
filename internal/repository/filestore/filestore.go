@@ -22,11 +22,11 @@ type Repo = repository.Repo
 // It supports both interval-based and event-driven saving strategies, and ensures safe concurrent access.
 type Store struct {
 	Repo
-	storeFilePath string
-	interval      time.Duration
 	cancel        context.CancelFunc
 	synchroCh     chan struct{}
+	storeFilePath string
 	wg            sync.WaitGroup
+	interval      time.Duration
 	mu            sync.RWMutex
 }
 

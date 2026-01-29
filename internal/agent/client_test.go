@@ -308,9 +308,9 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
 		serverHandler http.HandlerFunc
 		metrics       map[string]any
+		name          string
 		expectError   bool
 	}{
 		{
@@ -365,9 +365,9 @@ func TestHTTPClient_SendMetricsBatch_ErrorCases(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
 		serverHandler http.HandlerFunc
 		metrics       map[string]any
+		name          string
 		expectError   bool
 	}{
 		{
@@ -528,15 +528,15 @@ func TestHTTPClient_Run_ChannelClosed(t *testing.T) {
 
 func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
 	type args struct {
-		key   string
 		value any
+		key   string
 	}
 	tests := []struct {
-		name    string
 		args    args
 		want    model.Metrics
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "Positive test. new counter",

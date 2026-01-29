@@ -9,9 +9,9 @@ import (
 // including the Unix timestamp, list of affected metric IDs, and the client's IP address.
 // It is serialized as JSON for audit logging to files or HTTP endpoints.
 type AuditEvent struct {
-	Timestamp int64    `json:"ts"`
-	Metrics   []string `json:"metrics"`
 	IPAddress string   `json:"ip_address"`
+	Metrics   []string `json:"metrics"`
+	Timestamp int64    `json:"ts"`
 }
 
 // AuditObserver defines the interface for components that handle audit events.

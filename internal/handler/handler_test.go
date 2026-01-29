@@ -182,12 +182,12 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 
 	tests := []struct {
+		err            error
 		name           string
 		requestBody    string
-		err            error
+		expectedBody   string
 		nUpdateCalls   int
 		expectedStatus int
-		expectedBody   string
 	}{
 		{
 			name: "Positive test - counter metrics",
@@ -284,11 +284,11 @@ func TestHandlerMux_GetMetricsJSON(t *testing.T) {
 	gaugeValue := 3.14
 
 	tests := []struct {
+		mockSetup      func()
 		name           string
 		requestBody    string
-		mockSetup      func()
-		expectedStatus int
 		expectedBody   string
+		expectedStatus int
 		checkJSON      bool
 	}{
 		{
