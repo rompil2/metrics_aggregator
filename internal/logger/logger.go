@@ -1,3 +1,4 @@
+// Package logger provides a flexible and configurable logging solution for Go applications.
 // path: internal/logger
 package logger
 

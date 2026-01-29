@@ -1,3 +1,4 @@
+// Package memstore implements an in-memory metrics storage using sync.Map.
 // path: internal/repository/memstore
 package memstore
 

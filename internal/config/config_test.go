@@ -55,9 +55,9 @@ func TestSocketConfig_String(t *testing.T) {
 func TestServerConfig(t *testing.T) {
 	tests := []struct {
 		envVars        map[string]string
-		expectedConfig ServerConfig
 		name           string
 		flags          []string
+		expectedConfig ServerConfig
 	}{
 		{
 			name:    "default values",

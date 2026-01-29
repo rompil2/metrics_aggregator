@@ -1,3 +1,4 @@
+// Package agent provides a system metrics collector and sender for the metrics aggregator.
 // path: internal/agent/collector.go
 package agent
 

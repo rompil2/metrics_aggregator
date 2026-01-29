@@ -1,3 +1,4 @@
+// Package agent provides the core functionality for running a metrics collection and transmission agent.
 // path: internal/agent/agent.go
 package agent
 

@@ -1,3 +1,4 @@
+// Package dbstore provides a PostgreSQL-backed metrics repository with retry logic for transient database errors.
 package dbstore
 
 import (

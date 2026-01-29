@@ -1,3 +1,4 @@
+// Package model defines the structure of a metric entity with ID, type, and value.
 // path: internal/model
 package model
 

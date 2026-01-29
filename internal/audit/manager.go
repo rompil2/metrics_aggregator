@@ -1,3 +1,4 @@
+// Package audit provides functionality for managing audit observers and broadcasting audit events.
 // path: internal/audit/manager.go
 package audit
 

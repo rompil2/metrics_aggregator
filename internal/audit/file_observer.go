@@ -1,3 +1,4 @@
+// Package audit provides functionality for auditing successful metric operations.
 // path: internal/audit/file_observer.go
 package audit
 

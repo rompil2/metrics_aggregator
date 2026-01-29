@@ -1,3 +1,4 @@
+// Package handler contains the HTTP request handlers for the metrics aggregator service.
 // path: internal/handler/handler.go
 package handler
 

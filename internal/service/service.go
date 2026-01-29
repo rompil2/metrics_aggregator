@@ -1,3 +1,4 @@
+// Package service provides business logic for managing metrics.
 // path: internal/service
 package service
 

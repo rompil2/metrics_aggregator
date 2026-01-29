@@ -1,3 +1,4 @@
+// Package agent provides a client for sending metrics to a remote server via HTTP.
 // path: internal/agent/client.go
 package agent
 

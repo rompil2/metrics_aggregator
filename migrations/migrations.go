@@ -1,3 +1,4 @@
+// Package migrations contains embedded SQL migration files for migrating the database schema.
 // path: internal/migrations
 package migrations
 

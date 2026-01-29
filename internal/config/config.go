@@ -1,3 +1,4 @@
+// Package config provides configuration management for the metrics aggregator server.
 // path: internal/config
 package config
 

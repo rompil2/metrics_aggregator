@@ -1,3 +1,4 @@
+// Package audit provides auditing functionality for metrics operations.
 // path: internal/audit/middleware.go
 package audit
 

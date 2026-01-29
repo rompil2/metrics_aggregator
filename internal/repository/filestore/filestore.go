@@ -1,3 +1,4 @@
+// Package filestore provides a file-based storage implementation for metrics data.
 // path: internal/repository/filestore
 package filestore
 

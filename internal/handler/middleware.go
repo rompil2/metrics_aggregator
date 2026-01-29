@@ -1,3 +1,4 @@
+// Package handler provides HTTP request and response logging middleware.
 // path: internal/handler
 package handler
 
