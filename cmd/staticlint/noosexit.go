@@ -1,3 +1,4 @@
+// Package noosexit defines an analyzer that forbids direct calls to os.Exit in the main function of the main package.
 package main
 
 import (
@@ -8,7 +9,8 @@ import (
 	"golang.org/x/tools/go/ast/inspector"
 )
 
-// Analyzer reports a diagnostic if os.Exit is called directly inside main() in package main.
+// NoOsExitAnalyzer is an analyzer that reports diagnostics if os.Exit is called directly inside the main function
+// of the main package. It enforces graceful shutdown patterns by discouraging direct process termination.
 var NoOsExitAnalyzer = &analysis.Analyzer{
 	Name:     "noosexit",
 	Doc:      "forbids direct os.Exit calls in main function of main package",
@@ -16,6 +18,9 @@ var NoOsExitAnalyzer = &analysis.Analyzer{
 	Run:      run,
 }
 
+// run executes the logic of the NoOsExitAnalyzer.
+// It inspects the AST of the current package and identifies direct calls to os.Exit within the main function.
+// Reports a diagnostic if such a call is found, suggesting alternative approaches.
 func run(pass *analysis.Pass) (interface{}, error) {
 	// Check if current package is "main"
 	if pass.Pkg.Name() != "main" {

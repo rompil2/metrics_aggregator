@@ -62,18 +62,20 @@ import (
 	"honnef.co/go/tools/stylecheck"
 )
 
+// getStaticCheckAnalyzers returns a list of analyzers from the staticcheck suite,
+// including SA-class analyzers, at least one non-SA analyzer, and additional public analyzers.
 func getStaticCheckAnalyzers() []*analysis.Analyzer {
 	var analyzers []*analysis.Analyzer
 
-	// Все анализаторы класса SA (code smells)
+	// All SA-class analyzers (code smells)
 	for _, a := range staticcheck.Analyzers {
 		if strings.HasPrefix(a.Analyzer.Name, "SA") {
 			analyzers = append(analyzers, a.Analyzer)
 		}
 	}
 
-	// Не менее одного анализатора из других классов
-	// S1000 из класса simple
+	// At least one analyzer from other classes
+	// S1000 from the simple class
 	for _, a := range simple.Analyzers {
 		if a.Analyzer.Name == "S1000" {
 			analyzers = append(analyzers, a.Analyzer)
@@ -81,7 +83,7 @@ func getStaticCheckAnalyzers() []*analysis.Analyzer {
 		}
 	}
 
-	// ST1000 из класса stylecheck
+	// ST1000 from the stylecheck class
 	for _, a := range stylecheck.Analyzers {
 		if a.Analyzer.Name == "ST1000" {
 			analyzers = append(analyzers, a.Analyzer)
@@ -89,7 +91,7 @@ func getStaticCheckAnalyzers() []*analysis.Analyzer {
 		}
 	}
 
-	// QF1000 из класса quickfix
+	// QF1000 from the quickfix class
 	for _, a := range quickfix.Analyzers {
 		if a.Analyzer.Name == "QF1000" {
 			analyzers = append(analyzers, a.Analyzer)
