@@ -71,7 +71,7 @@ func scanAndGenerate(rootDir string) error {
 		return err
 	}
 
-	var allPackages map[string]*PackageInfo = make(map[string]*PackageInfo)
+	allPackages := make(map[string]*PackageInfo)
 
 	for _, pkg := range pkgs {
 		if pkg.Errors != nil {
