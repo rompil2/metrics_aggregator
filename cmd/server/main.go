@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	PATH_TO_TEMPLATE = "templates/index.html"
+	PathToTemplate = "templates/index.html"
 )
 
 func main() {
@@ -62,7 +62,7 @@ func main() {
 	srvc := service.NewMetricService(repo)
 	handler := handler.NewHandlerMux(
 		srvc,
-		template.Must(template.ParseFiles(PATH_TO_TEMPLATE)),
+		template.Must(template.ParseFiles(PathToTemplate)),
 		cfg.HashConfig.String(),
 		cfg.AuditFile.String(),
 		cfg.AuditURL.String(),
