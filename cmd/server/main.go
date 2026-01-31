@@ -21,6 +21,10 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/service"
 )
 
+const (
+	PathToTemplate = "templates/index.html"
+)
+
 func main() {
 	var (
 		repo service.Repo
@@ -56,9 +60,13 @@ func main() {
 	}
 
 	srvc := service.NewMetricService(repo)
-
-	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles("templates/index.html")), cfg.HashConfig.String())
-
+	handler := handler.NewHandlerMux(
+		srvc,
+		template.Must(template.ParseFiles(PathToTemplate)),
+		cfg.HashConfig.String(),
+		cfg.AuditFile.String(),
+		cfg.AuditURL.String(),
+	)
 	server := &http.Server{
 		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,

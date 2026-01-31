@@ -16,10 +16,10 @@ func TestMetricService_UpdateMetrics(t *testing.T) {
 		metric *model.Metrics
 	}
 	tests := []struct {
-		name      string
 		args      args
-		wantErr   bool
+		name      string
 		errString string
+		wantErr   bool
 	}{
 		{
 			name: "Positive test. Add a new counter",
@@ -84,10 +84,10 @@ func TestMetricService_UpdateMetrics_SecondTime(t *testing.T) {
 		metric *model.Metrics
 	}
 	tests := []struct {
-		name      string
 		args      args
-		wantErr   bool
+		name      string
 		errString string
+		wantErr   bool
 	}{
 		{
 			name: "Positive test. Update existing counter",
@@ -153,14 +153,14 @@ func TestMetricService_UpdateMetrics_SecondTime(t *testing.T) {
 
 func TestMetricService_GetMetrics(t *testing.T) {
 	type args struct {
-		metricID string
 		metric   *model.Metrics
+		metricID string
 	}
 	tests := []struct {
-		name      string
 		args      args
-		wantErr   bool
+		name      string
 		errString string
+		wantErr   bool
 	}{
 		{
 			name: "Negative test. No counter",
@@ -244,9 +244,9 @@ func TestMetricService_GetMetrics(t *testing.T) {
 func TestMetricService_GetAllMetrics(t *testing.T) {
 	tests := []struct {
 		name      string
+		errString string
 		metrics   []model.Metrics
 		wantErr   bool
-		errString string
 	}{
 		{
 			name: "Positive test. There are some metrics",
@@ -313,8 +313,8 @@ func TestMetricService_GetAllMetrics(t *testing.T) {
 func TestMetricService_Ping(t *testing.T) {
 	tests := []struct {
 		name      string
-		wantErr   bool
 		errString string
+		wantErr   bool
 	}{
 		{
 			name:    "Positive test. Ping successful",
@@ -362,9 +362,9 @@ func TestMetricService_Ping(t *testing.T) {
 func TestMetricService_UpdateAllMetrics(t *testing.T) {
 	tests := []struct {
 		name      string
+		errString string
 		metrics   []model.Metrics
 		wantErr   bool
-		errString string
 	}{
 		{
 			name: "Positive test. Update multiple metrics successfully",
