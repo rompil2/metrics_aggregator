@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -25,7 +26,22 @@ const (
 	PathToTemplate = "templates/index.html"
 )
 
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+}
+
 func main() {
+
+	printBuildInfo()
+
 	var (
 		repo service.Repo
 	)
@@ -96,5 +112,4 @@ func main() {
 	}
 
 	log.Println("Server stopped")
-
 }

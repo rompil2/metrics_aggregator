@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -17,8 +18,20 @@ const (
 	waitBeforeQuit = 1 // in seconds
 )
 
-func main() {
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
 
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+}
+
+func main() {
+	printBuildInfo()
 	cfg := config.LoadAgentConfig(os.Args[1:])
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
