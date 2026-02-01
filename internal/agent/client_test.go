@@ -70,7 +70,7 @@ func TestHTTPClient_Run_MetricsProcessing_Individual(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 3)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -308,9 +308,9 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
 		serverHandler http.HandlerFunc
 		metrics       map[string]any
+		name          string
 		expectError   bool
 	}{
 		{
@@ -365,9 +365,9 @@ func TestHTTPClient_SendMetricsBatch_ErrorCases(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
 		serverHandler http.HandlerFunc
 		metrics       map[string]any
+		name          string
 		expectError   bool
 	}{
 		{
@@ -412,24 +412,69 @@ func TestHTTPClient_SendMetricsBatch_ErrorCases(t *testing.T) {
 func TestHTTPClient_SendMetrics_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
+	// Канал для сигнала, что сервер начал обработку
+	serverStarted := make(chan struct{}, 1)
+	// Канал для сигнала, что сервер завершил обработку (для отладки/контроля)
+	serverDone := make(chan struct{}, 1)
+
 	// Сервер, который долго обрабатывает запрос
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverStarted <- struct{}{} // сигнализируем, что запрос получен
 		time.Sleep(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
+		serverDone <- struct{}{}
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
-	client.socket = server.URL
+	client := NewHTTPClient(10*time.Second, "localhost", 8080, false, "", 1)
+	client.socket = server.URL // принудительно подставляем URL
 
+	// Контекст с коротким таймаутом — явно меньше времени ответа сервера
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	metrics := map[string]interface{}{"test": int64(1)}
-	err := client.SendMetrics(ctx, metrics)
+
+	// Запускаем SendMetrics в отдельной горутине
+	errChan := make(chan error, 1)
+	go func() {
+		err := client.SendMetrics(ctx, metrics)
+		errChan <- err
+	}()
+
+	// Убедимся, что сервер начал обработку
+	select {
+	case <-serverStarted:
+		// Сервер получил запрос — хорошо
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("server did not receive request in time")
+	}
+
+	// Ожидаем ошибку от клиента
+	var err error
+	select {
+	case err = <-errChan:
+		// Ошибка получена
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for client error")
+	}
+
+	// Проверяем, что ошибка — из-за отмены контекста
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled), "Expected context error")
+	assert.True(t, errors.Is(err, context.DeadlineExceeded),
+		"expected context deadline exceeded, got %v", err)
+
+	// Убедимся, что сервер НЕ завершил обработку (запрос был прерван)
+	select {
+	case <-serverDone:
+		t.Error("server should not have completed handling the request")
+	default:
+		// OK: сервер ещё работает или соединение разорвано
+	}
+
+	// Дополнительная задержка, чтобы увидеть, если сервер всё-таки отвечает
+	// (для отладки, не обязательна)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestHTTPClient_SendMetricsBatch_ContextCancellation(t *testing.T) {
@@ -483,15 +528,15 @@ func TestHTTPClient_Run_ChannelClosed(t *testing.T) {
 
 func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
 	type args struct {
-		key   string
 		value any
+		key   string
 	}
 	tests := []struct {
-		name    string
 		args    args
 		want    model.Metrics
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "Positive test. new counter",

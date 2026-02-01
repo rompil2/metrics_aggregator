@@ -1,3 +1,5 @@
+// Package agent provides a system metrics collector and sender for the metrics aggregator.
+// path: internal/agent/collector.go
 package agent
 
 import (
@@ -13,19 +15,23 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
+// Collector gathers system and runtime metrics at regular intervals,
+// including Go runtime statistics, memory usage, CPU utilization per core, and a random value.
 type Collector struct {
 	pollCount    int64
 	randomValue  float64
 	pollInterval time.Duration
 }
 
+// NewCollector creates a new Collector instance that polls metrics every pollInterval duration.
 func NewCollector(pollInterval time.Duration) *Collector {
 	return &Collector{
 		pollInterval: pollInterval,
 	}
 }
 
-// Run implements agent.Collector.
+// Run starts the metric collection loop, sending gathered metrics to the provided channel
+// at each polling interval until the context is cancelled. It is intended to be run in a separate goroutine.
 func (r *Collector) Run(ctx context.Context, ch chan map[string]any) {
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
@@ -40,6 +46,9 @@ LOOP:
 	}
 }
 
+// Poll collects a snapshot of current system and runtime metrics,
+// including Go memory statistics, total/free memory, per-core CPU utilization, and a random value.
+// It is safe to call concurrently and returns a new map on each invocation.
 func (r *Collector) Poll() map[string]any {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats) // Get memory stats

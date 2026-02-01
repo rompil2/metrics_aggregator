@@ -107,9 +107,12 @@ func TestHandlerMux_UpdatePost(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService, nil, "")
+			h := NewHandlerMux(mockService, nil, "", "", "")
 			if !tt.wantErr {
-				mockService.EXPECT().UpdateMetrics(gomock.Any()).Return(fmt.Errorf("Unknown metrics ID, created the new one")).Times(1)
+				mockService.EXPECT().
+					UpdateMetrics(gomock.Any()).
+					Return(fmt.Errorf("Unknown metrics ID, created the new one")).
+					Times(1)
 			}
 			r := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -151,9 +154,12 @@ func TestHandlerMux_ValueGet(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService, nil, "")
+			h := NewHandlerMux(mockService, nil, "", "", "")
 			if tt.wantErr {
-				mockService.EXPECT().GetMetrics(gomock.Any()).Return(model.Metrics{}, fmt.Errorf("unknown metrics ID")).MinTimes(0)
+				mockService.EXPECT().
+					GetMetrics(gomock.Any()).
+					Return(model.Metrics{}, fmt.Errorf("unknown metrics ID")).
+					MinTimes(0)
 			} else {
 				mockService.EXPECT().GetMetrics(gomock.Any()).Return(testMetrics, nil).Times(1)
 			}
@@ -176,12 +182,12 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 
 	tests := []struct {
+		err            error
 		name           string
 		requestBody    string
-		err            error
+		expectedBody   string
 		nUpdateCalls   int
 		expectedStatus int
-		expectedBody   string
 	}{
 		{
 			name: "Positive test - counter metrics",
@@ -253,7 +259,7 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 			if tt.nUpdateCalls > 0 {
 				mockService.EXPECT().UpdateMetrics(gomock.Any()).Times(tt.nUpdateCalls).Return(tt.err)
 			}
-			h := NewHandlerMux(mockService, nil, "")
+			h := NewHandlerMux(mockService, nil, "", "", "")
 
 			r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
@@ -278,11 +284,11 @@ func TestHandlerMux_GetMetricsJSON(t *testing.T) {
 	gaugeValue := 3.14
 
 	tests := []struct {
+		mockSetup      func()
 		name           string
 		requestBody    string
-		mockSetup      func()
-		expectedStatus int
 		expectedBody   string
+		expectedStatus int
 		checkJSON      bool
 	}{
 		{
@@ -364,7 +370,7 @@ func TestHandlerMux_GetMetricsJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.mockSetup()
-			h := NewHandlerMux(mockService, nil, "")
+			h := NewHandlerMux(mockService, nil, "", "", "")
 
 			r := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
@@ -401,7 +407,7 @@ func TestHandlerMux_GetMetricsJSON_ContentType(t *testing.T) {
 			Delta: &counterValue,
 		}, nil).Times(1)
 
-	h := NewHandlerMux(mockService, nil, "")
+	h := NewHandlerMux(mockService, nil, "", "", "")
 
 	requestBody := `{
 		"id": "test_counter",
@@ -449,7 +455,7 @@ func TestHandlerMux_UpdateWithJSON_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService, nil, "")
+			h := NewHandlerMux(mockService, nil, "", "", "")
 
 			r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
