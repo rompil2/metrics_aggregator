@@ -1,3 +1,5 @@
+// path: internal/pool/pool.go
+// Package pool provides a thread-safe object pool for reusable objects.
 package pool
 
 import (
