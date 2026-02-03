@@ -11,6 +11,7 @@ import (
 
 	"github.com/rompil2/metrics_aggregator/internal/agent"
 	"github.com/rompil2/metrics_aggregator/internal/config"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 )
 
 const (
@@ -35,10 +36,18 @@ func main() {
 	cfg := config.LoadAgentConfig(os.Args[1:])
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	publicKey, err := crypto.LoadPublicKey(cfg.PublicKeyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Fatalf("Public key file not found: %v", err)
+		} else {
+			log.Fatalf("Error loading public key: %v", err)
+		}
+	}
 
 	// Настройка агента
 	collector := agent.NewCollector(cfg.PollInterval)
-	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.Host, cfg.Port, true, cfg.HashConfig.String(), cfg.RateLimit)
+	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.Host, cfg.Port, true, cfg.HashConfig.String(), cfg.RateLimit, publicKey)
 	agent := agent.New(collector, client)
 
 	// Запуск агента

@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/rompil2/metrics_aggregator/internal/config"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository/dbstore"
 	"github.com/rompil2/metrics_aggregator/internal/repository/filestore"
@@ -75,6 +76,11 @@ func main() {
 		repo = dbRepo
 	}
 
+	privateKey, err := crypto.LoadPrivateKey(cfg.PrivateKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading private key: %v", err)
+	}
+
 	srvc := service.NewMetricService(repo)
 	handler := handler.NewHandlerMux(
 		srvc,
@@ -82,6 +88,7 @@ func main() {
 		cfg.HashConfig.String(),
 		cfg.AuditFile.String(),
 		cfg.AuditURL.String(),
+		privateKey,
 	)
 	server := &http.Server{
 		Addr:    cfg.SocketConfig.String(),

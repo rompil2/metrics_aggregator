@@ -107,7 +107,7 @@ func TestHandlerMux_UpdatePost(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService, nil, "", "", "")
+			h := NewHandlerMux(mockService, nil, "", "", "", nil)
 			if !tt.wantErr {
 				mockService.EXPECT().
 					UpdateMetrics(gomock.Any()).
@@ -154,7 +154,7 @@ func TestHandlerMux_ValueGet(t *testing.T) {
 	mockService := mocks.NewMockService(ctrl)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService, nil, "", "", "")
+			h := NewHandlerMux(mockService, nil, "", "", "", nil)
 			if tt.wantErr {
 				mockService.EXPECT().
 					GetMetrics(gomock.Any()).
@@ -259,7 +259,7 @@ func TestHandlerMux_UpdateWithJSON(t *testing.T) {
 			if tt.nUpdateCalls > 0 {
 				mockService.EXPECT().UpdateMetrics(gomock.Any()).Times(tt.nUpdateCalls).Return(tt.err)
 			}
-			h := NewHandlerMux(mockService, nil, "", "", "")
+			h := NewHandlerMux(mockService, nil, "", "", "", nil)
 
 			r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
@@ -370,7 +370,7 @@ func TestHandlerMux_GetMetricsJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.mockSetup()
-			h := NewHandlerMux(mockService, nil, "", "", "")
+			h := NewHandlerMux(mockService, nil, "", "", "", nil)
 
 			r := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")
@@ -407,7 +407,7 @@ func TestHandlerMux_GetMetricsJSON_ContentType(t *testing.T) {
 			Delta: &counterValue,
 		}, nil).Times(1)
 
-	h := NewHandlerMux(mockService, nil, "", "", "")
+	h := NewHandlerMux(mockService, nil, "", "", "", nil)
 
 	requestBody := `{
 		"id": "test_counter",
@@ -455,7 +455,7 @@ func TestHandlerMux_UpdateWithJSON_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandlerMux(mockService, nil, "", "", "")
+			h := NewHandlerMux(mockService, nil, "", "", "", nil)
 
 			r := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewBufferString(tt.requestBody))
 			r.Header.Set("Content-Type", "application/json")

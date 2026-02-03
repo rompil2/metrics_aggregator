@@ -19,7 +19,7 @@ func TestNewHTTPClient(t *testing.T) {
 	t.Parallel()
 
 	// Тестируем с batchEnabled = false
-	client := NewHTTPClient(10*time.Second, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(10*time.Second, "localhost", 8080, false, "", 1, nil)
 
 	assert.Equal(t, 10*time.Second, client.reportInterval)
 	assert.Equal(t, "http://localhost:8080", client.socket)
@@ -28,14 +28,14 @@ func TestNewHTTPClient(t *testing.T) {
 	assert.Equal(t, 30*time.Second, client.client.Timeout)
 
 	// Тестируем с batchEnabled = true
-	clientWithBatch := NewHTTPClient(5*time.Second, "example.com", 9090, true, "", 1)
+	clientWithBatch := NewHTTPClient(5*time.Second, "example.com", 9090, true, "", 1, nil)
 	assert.True(t, clientWithBatch.batchEnabled)
 }
 
 func TestHTTPClient_Run_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	metricsCh := make(chan map[string]any)
 
@@ -70,7 +70,7 @@ func TestHTTPClient_Run_MetricsProcessing_Individual(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 3)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 3, nil)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -124,7 +124,7 @@ func TestHTTPClient_Run_MetricsProcessing_Batch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, true, "", 1)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, true, "", 1, nil)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -181,7 +181,7 @@ func TestHTTPClient_sendMetrics_withHash(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "secret", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "secret", 1, nil)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -214,7 +214,7 @@ func TestHTTPClient_SendMetrics_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1, nil)
 	// Подменяем адрес сервера на тестовый
 	client.socket = server.URL
 
@@ -249,7 +249,7 @@ func TestHTTPClient_SendMetricsBatch_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1, nil)
 	client.socket = server.URL
 
 	metrics := map[string]interface{}{
@@ -270,7 +270,7 @@ func TestHTTPClient_SendMetricsBatch_WithInvalidMetrics(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1, nil)
 	client.socket = server.URL
 
 	// Смесь валидных и невалидных метрик
@@ -294,7 +294,7 @@ func TestHTTPClient_SendMetricsBatch_EmptyMetrics(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1, nil)
 	client.socket = server.URL
 
 	// Пустые метрики
@@ -348,7 +348,7 @@ func TestHTTPClient_SendMetrics_ErrorCases(t *testing.T) {
 			server := httptest.NewServer(tc.serverHandler)
 			defer server.Close()
 
-			client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+			client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1, nil)
 			client.socket = server.URL
 
 			err := client.SendMetrics(context.Background(), tc.metrics)
@@ -396,7 +396,7 @@ func TestHTTPClient_SendMetricsBatch_ErrorCases(t *testing.T) {
 			server := httptest.NewServer(tc.serverHandler)
 			defer server.Close()
 
-			client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+			client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1, nil)
 			client.socket = server.URL
 
 			err := client.SendMetricsBatch(context.Background(), tc.metrics)
@@ -426,7 +426,7 @@ func TestHTTPClient_SendMetrics_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(10*time.Second, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(10*time.Second, "localhost", 8080, false, "", 1, nil)
 	client.socket = server.URL // принудительно подставляем URL
 
 	// Контекст с коротким таймаутом — явно меньше времени ответа сервера
@@ -487,7 +487,7 @@ func TestHTTPClient_SendMetricsBatch_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, true, "", 1, nil)
 	client.socket = server.URL
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -503,7 +503,7 @@ func TestHTTPClient_SendMetricsBatch_ContextCancellation(t *testing.T) {
 func TestHTTPClient_Run_ChannelClosed(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(100*time.Millisecond, "localhost", 8080, false, "", 1, nil)
 	metricsCh := make(chan map[string]interface{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -612,7 +612,7 @@ func TestHTTPMetricProcessor_CreateMetric(t *testing.T) {
 func TestHTTPClient_compressData(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1, nil)
 
 	testData := []byte("test data for compression")
 	compressed, err := client.compressData(testData)
@@ -625,7 +625,7 @@ func TestHTTPClient_compressData(t *testing.T) {
 func TestHTTPClient_handleErrors(t *testing.T) {
 	t.Parallel()
 
-	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1)
+	client := NewHTTPClient(1*time.Second, "localhost", 8080, false, "", 1, nil)
 
 	// Нет ошибок
 	err := client.handleErrors(nil)

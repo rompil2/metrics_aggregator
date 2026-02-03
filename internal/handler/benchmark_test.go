@@ -14,7 +14,7 @@ import (
 func BenchmarkHandler_UpdateJSON(b *testing.B) {
 	repo := memstore.NewMemStore()
 	svc := service.NewMetricService(repo)
-	h := handler.NewHandlerMux(svc, nil, "", "", "")
+	h := handler.NewHandlerMux(svc, nil, "", "", "", nil)
 
 	jsonData := `{"id":"testCounter","type":"counter","delta":1}`
 
@@ -30,7 +30,7 @@ func BenchmarkHandler_UpdateJSON(b *testing.B) {
 func BenchmarkHandler_GetMetricJSON(b *testing.B) {
 	repo := memstore.NewMemStore()
 	svc := service.NewMetricService(repo)
-	h := handler.NewHandlerMux(svc, nil, "", "", "")
+	h := handler.NewHandlerMux(svc, nil, "", "", "", nil)
 
 	// Подготовка данных
 	svc.UpdateMetrics(&model.Metrics{

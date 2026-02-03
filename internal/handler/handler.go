@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,7 +43,7 @@ type HandlerMux struct {
 // It configures request ID, real IP extraction, request decompression, response compression,
 // optional request/response hashing, structured logging, recovery, and audit logging.
 // The provided service is used for business logic, and the template is used for the root HTML page.
-func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string) *HandlerMux {
+func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string, privateKey *rsa.PrivateKey) *HandlerMux {
 
 	h := &HandlerMux{
 		Service: service,
@@ -57,6 +58,7 @@ func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath,
 		h.Use(MiddlewareCheckHash(key))
 	}
 	h.Use(NaiveLoggerMiddleware)
+	h.Use(MiddlewareCryptoDecrypt(privateKey))
 	h.Use(MiddlewareResponseZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
 	if key != "" {

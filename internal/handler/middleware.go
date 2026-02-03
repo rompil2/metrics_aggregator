@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 )
 
@@ -243,6 +245,42 @@ func MiddlewareResponseZip(next http.Handler) http.Handler {
 			}
 		}
 	})
+}
+
+// MiddlewareCryptoDecrypt принимает приватный ключ и возвращает middleware,
+// которое расшифровывает тело запроса перед передачей дальше.
+func MiddlewareCryptoDecrypt(privateKey *rsa.PrivateKey) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Если ключ не предоставлен, просто пропускаем
+			if privateKey == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Читаем тело запроса
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Unable to read request body", http.StatusBadRequest)
+				return
+			}
+			r.Body.Close()
+
+			// Расшифровываем тело
+			decryptedBody, err := crypto.DecryptWithPrivateKey(privateKey, body)
+			if err != nil {
+				http.Error(w, "Decryption failed", http.StatusBadRequest)
+				return
+			}
+
+			// Заменяем тело запроса на расшифрованное
+			r.Body = io.NopCloser(bytes.NewReader(decryptedBody))
+			r.ContentLength = int64(len(decryptedBody))
+
+			// Передаём управление дальше
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // supportsGzip checks if the client explicitly accepts gzip encoding.

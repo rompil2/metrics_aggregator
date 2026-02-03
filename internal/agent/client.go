@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
@@ -50,6 +52,7 @@ type HTTPClient struct {
 	rateLimit      uint
 	mu             sync.RWMutex
 	batchEnabled   bool
+	publicKey      *rsa.PublicKey
 }
 
 // NewHTTPClient creates a new HTTPClient configured with the given reporting interval, server address,
@@ -62,6 +65,8 @@ func NewHTTPClient(
 	batchEnabled bool,
 	hashKey string,
 	rateLimit uint,
+	publicKey *rsa.PublicKey,
+
 ) *HTTPClient {
 	if hashKey != "" {
 		key := []byte(hashKey)
@@ -76,6 +81,7 @@ func NewHTTPClient(
 			hasher:       &hash,
 			mu:           sync.RWMutex{},
 			rateLimit:    rateLimit,
+			publicKey:    publicKey,
 		}
 	}
 	return &HTTPClient{
@@ -87,6 +93,7 @@ func NewHTTPClient(
 		batchEnabled: batchEnabled,
 		hasher:       nil,
 		rateLimit:    rateLimit,
+		publicKey:    publicKey,
 	}
 }
 
@@ -204,6 +211,13 @@ producerLoop:
 			h.appendError(&mu, &errs, err)
 			break
 		}
+		// encode data with public key if it is set
+		if h.publicKey != nil {
+			buf, err = h.encriptData(buf)
+			if err != nil {
+				return fmt.Errorf("encoding data: %w", err)
+			}
+		}
 		hashString := new(string)
 		if h.hasher != nil {
 			mu.Lock()
@@ -259,6 +273,15 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 	if err != nil {
 		return fmt.Errorf("marshaling metrics batch: %w", err)
 	}
+
+	// encode data with public key if it is set
+	if h.publicKey != nil {
+		jsonData, err = h.encriptData(jsonData)
+		if err != nil {
+			return fmt.Errorf("encoding data: %w", err)
+		}
+	}
+
 	hashString := new(string)
 	if h.hasher != nil {
 		(*h.hasher).Reset()
@@ -457,4 +480,8 @@ func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics
 // MarshalMetric serializes a model.Metrics instance to JSON bytes.
 func (p *HTTPMetricProcessor) MarshalMetric(metric model.Metrics) ([]byte, error) {
 	return json.Marshal(metric)
+}
+
+func (h *HTTPClient) encriptData(data []byte) ([]byte, error) {
+	return crypto.EncryptWithPublicKey(h.publicKey, data)
 }
