@@ -36,11 +36,11 @@ func TestSocketConfig_String(t *testing.T) {
 	tests := []struct {
 		name string
 		Host string
-		Port uint
 		want string
+		Port uint
 	}{
 		// TODO: Add test cases.
-		{"Positive test", "localhost", 8081, "localhost:8081"},
+		{"Positive test", "localhost", "localhost:8081", 8081},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,8 +54,8 @@ func TestSocketConfig_String(t *testing.T) {
 
 func TestServerConfig(t *testing.T) {
 	tests := []struct {
-		name           string
 		envVars        map[string]string
+		name           string
 		flags          []string
 		expectedConfig ServerConfig
 	}{
@@ -74,12 +74,27 @@ func TestServerConfig(t *testing.T) {
 					Host: defaultHost,
 					Port: defaultPort,
 				},
+				PrivateKeyPath: "",
 			},
 		},
 		{
 			name:    "values from flags",
 			envVars: map[string]string{},
-			flags:   []string{"-a", "127.0.0.1:9092", "-i", "20", "-f", "temp.tmp", "-r"},
+			flags: []string{
+				"-a",
+				"127.0.0.1:9092",
+				"-i",
+				"20",
+				"-f",
+				"temp.tmp",
+				"-r",
+				"-audit-file",
+				"audit_file.txt",
+				"-audit-url",
+				"http://localhost:8787",
+				"-crypto-key",
+				"private.key",
+			},
 			expectedConfig: ServerConfig{
 				StoreConfig: StoreConfig{
 					StoreInterval:   20 * time.Second,
@@ -90,6 +105,11 @@ func TestServerConfig(t *testing.T) {
 					Host: "127.0.0.1",
 					Port: 9092,
 				},
+				AuditConfig: AuditConfig{
+					AuditFile: Audit{"audit_file.txt"},
+					AuditURL:  Audit{"http://localhost:8787"},
+				},
+				PrivateKeyPath: "private.key",
 			},
 		},
 		{
@@ -99,6 +119,9 @@ func TestServerConfig(t *testing.T) {
 				"STORE_INTERVAL":    "2",
 				"FILE_STORAGE_PATH": "/tmp/tmp.tmp",
 				"RESTORE":           "false",
+				"AUDIT_FILE":        "audit_file.txt",
+				"AUDIT_URL":         "http://localhost:8787",
+				"CRYPTO_KEY":        "private.key",
 			},
 			flags: []string{"-a", "127.0.0.1:9092", "-i", "20", "-f", "temp.tmp", "-r"},
 			expectedConfig: ServerConfig{
@@ -111,6 +134,11 @@ func TestServerConfig(t *testing.T) {
 					Host: "0.0.0.0",
 					Port: 8123,
 				},
+				AuditConfig: AuditConfig{
+					AuditFile: Audit{"audit_file.txt"},
+					AuditURL:  Audit{"http://localhost:8787"},
+				},
+				PrivateKeyPath: "private.key",
 			},
 		},
 	}
@@ -149,6 +177,7 @@ func TestLoadAgentConfig(t *testing.T) {
 				SocketConfig: SocketConfig{
 					Host: "localhost",
 					Port: 8080},
+				RateLimit: 1,
 			},
 		},
 		{
@@ -163,6 +192,7 @@ func TestLoadAgentConfig(t *testing.T) {
 				SocketConfig: SocketConfig{
 					Host: "127.0.0.1",
 					Port: 9090},
+				RateLimit: 1,
 			},
 		},
 		{
@@ -178,6 +208,7 @@ func TestLoadAgentConfig(t *testing.T) {
 				SocketConfig: SocketConfig{
 					Host: "example.com",
 					Port: 9090},
+				RateLimit: 1,
 			},
 		},
 	}

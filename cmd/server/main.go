@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/rompil2/metrics_aggregator/internal/config"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository/dbstore"
 	"github.com/rompil2/metrics_aggregator/internal/repository/filestore"
@@ -21,7 +23,26 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/service"
 )
 
+const (
+	PathToTemplate = "templates/index.html"
+)
+
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+}
+
 func main() {
+
+	printBuildInfo()
+
 	var (
 		repo service.Repo
 	)
@@ -55,10 +76,20 @@ func main() {
 		repo = dbRepo
 	}
 
+	privateKey, err := crypto.LoadPrivateKey(cfg.PrivateKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading private key: %v", err)
+	}
+
 	srvc := service.NewMetricService(repo)
-
-	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles("templates/index.html")), cfg.HashConfig.String())
-
+	handler := handler.NewHandlerMux(
+		srvc,
+		template.Must(template.ParseFiles(PathToTemplate)),
+		cfg.HashConfig.String(),
+		cfg.AuditFile.String(),
+		cfg.AuditURL.String(),
+		privateKey,
+	)
 	server := &http.Server{
 		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,
@@ -88,5 +119,4 @@ func main() {
 	}
 
 	log.Println("Server stopped")
-
 }
