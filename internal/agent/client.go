@@ -29,7 +29,7 @@ import (
 const (
 	errChSize       = 1
 	updatePath      = "/update/"
-	batchUpdatePath = "/updates/" // Добавляем отдельный путь для batch обновлений
+	batchUpdatePath = "/updates/" // Add separate path for batch updates
 )
 
 // Metrics represents a map of metric names to their current values, used for internal aggregation.
@@ -75,7 +75,7 @@ func NewHTTPClient(
 			reportInterval: reportInterval,
 			socket:         fmt.Sprintf("http://%s:%v", host, port),
 			client: &http.Client{
-				Timeout: 30 * time.Second, // Добавляем таймаут
+				Timeout: 30 * time.Second, // Add timeout
 			},
 			batchEnabled: batchEnabled,
 			hasher:       &hash,
@@ -88,7 +88,7 @@ func NewHTTPClient(
 		reportInterval: reportInterval,
 		socket:         fmt.Sprintf("http://%s:%v", host, port),
 		client: &http.Client{
-			Timeout: 30 * time.Second, // Добавляем таймаут
+			Timeout: 30 * time.Second, // Add timeout
 		},
 		batchEnabled: batchEnabled,
 		hasher:       nil,
@@ -109,7 +109,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 
 	var wg sync.WaitGroup
 
-	// Обработчик ошибок
+	// Error handler
 	go func() {
 		for err := range errCh {
 			if err != nil {
@@ -231,7 +231,7 @@ producerLoop:
 			mu.Unlock()
 		}
 
-		// Создаем сжатые данные
+		// create data compressor
 		compressedData, err := h.compressData(buf)
 		if err != nil {
 			h.appendError(&mu, &errs, fmt.Errorf("compressing data for %s: %w", key, err))
@@ -258,17 +258,17 @@ producerLoop:
 // It serializes the entire batch, optionally computes a single hash, compresses with gzip,
 // and sends it in one HTTP POST. This method is used when rateLimit < 2.
 func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) error {
-	// Создаем batch метрик
+	// Create batch metrics
 	metricsBatch, errs := h.createMetricsBatch(metrics)
 	if len(errs) > 0 {
 		return h.handleErrors(errs)
 	}
 
 	if len(metricsBatch) == 0 {
-		return nil // Нет валидных метрик для отправки
+		return nil // No valid metrics to send
 	}
 
-	// Маршалим в JSON
+	// Marshal to JSON
 	jsonData, err := json.Marshal(metricsBatch)
 	if err != nil {
 		return fmt.Errorf("marshaling metrics batch: %w", err)
@@ -291,14 +291,14 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 		*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
 	}
 
-	// Сжимаем данные
+	// Compress data
 	compressedData, err := h.compressData(jsonData)
 	if err != nil {
 		return fmt.Errorf("compressing batch data: %w", err)
 	}
 
-	// Отправляем запрос
-	url := h.socket + batchUpdatePath // Используем отдельный endpoint для batch
+	// Send request
+	url := h.socket + batchUpdatePath // Use separate endpoint for batch
 	return h.sendRequest(ctx, url, compressedData, hashString)
 }
 
@@ -396,7 +396,7 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 	return fmt.Errorf("all %d attempts failed, last error: %w", maxAttempts, lastErr)
 }
 
-// isRetriableError checks if an error is retriable
+// isRetriableError checks if an error is retriable.
 func (h *HTTPClient) isRetriableError(err error) bool {
 	// Network errors, timeouts, and temporary errors are retriable
 	var netErr net.Error
@@ -418,7 +418,7 @@ func (h *HTTPClient) isRetriableError(err error) bool {
 	return false
 }
 
-// isRetriableStatusCode checks if an HTTP status code is retriable
+// isRetriableStatusCode checks if an HTTP status code is retriable.
 func (h *HTTPClient) isRetriableStatusCode(statusCode int) bool {
 	// 5xx errors are server errors and usually retriable
 	// 429 (Too Many Requests) and 408 (Request Timeout) are also retriable
