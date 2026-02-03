@@ -74,6 +74,7 @@ func TestServerConfig(t *testing.T) {
 					Host: defaultHost,
 					Port: defaultPort,
 				},
+				PrivateKeyPath: "",
 			},
 		},
 		{
@@ -91,6 +92,8 @@ func TestServerConfig(t *testing.T) {
 				"audit_file.txt",
 				"-audit-url",
 				"http://localhost:8787",
+				"-crypto-key",
+				"private.key",
 			},
 			expectedConfig: ServerConfig{
 				StoreConfig: StoreConfig{
@@ -106,6 +109,7 @@ func TestServerConfig(t *testing.T) {
 					AuditFile: Audit{"audit_file.txt"},
 					AuditURL:  Audit{"http://localhost:8787"},
 				},
+				PrivateKeyPath: "private.key",
 			},
 		},
 		{
@@ -117,6 +121,7 @@ func TestServerConfig(t *testing.T) {
 				"RESTORE":           "false",
 				"AUDIT_FILE":        "audit_file.txt",
 				"AUDIT_URL":         "http://localhost:8787",
+				"CRYPTO_KEY":        "private.key",
 			},
 			flags: []string{"-a", "127.0.0.1:9092", "-i", "20", "-f", "temp.tmp", "-r"},
 			expectedConfig: ServerConfig{
@@ -133,6 +138,7 @@ func TestServerConfig(t *testing.T) {
 					AuditFile: Audit{"audit_file.txt"},
 					AuditURL:  Audit{"http://localhost:8787"},
 				},
+				PrivateKeyPath: "private.key",
 			},
 		},
 	}

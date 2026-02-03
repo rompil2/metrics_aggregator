@@ -1,3 +1,5 @@
+// Package crypto provides encription and decryption utilities
+// path: internal/crypto
 package crypto
 
 import (

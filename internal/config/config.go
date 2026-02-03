@@ -126,8 +126,6 @@ func LoadServerConfig(args []string) ServerConfig {
 	auditFile := Audit{}
 	auditURL := Audit{}
 
-	var privateKeyPath string
-
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
@@ -136,7 +134,7 @@ func LoadServerConfig(args []string) ServerConfig {
 	database := flagSet.String("d", "", "A DB connection string")
 	flagSet.Var(&auditFile, "audit-file", "--audit-file=<path to an audit log file>")
 	flagSet.Var(&auditURL, "audit-url", "--audit-url=<URL to an audit log service>")
-	flag.StringVar(&privateKeyPath, "crypto-key", "", "Path to the private key for decryption")
+	privateKeyPath := flagSet.String("crypto-key", "", "Path to the private key for decryption")
 
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
@@ -181,7 +179,7 @@ func LoadServerConfig(args []string) ServerConfig {
 		log.Info().Str("AUDIT_URL", val).Send()
 	}
 	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
-		privateKeyPath = val
+		*privateKeyPath = val
 	}
 
 	return ServerConfig{
@@ -197,7 +195,7 @@ func LoadServerConfig(args []string) ServerConfig {
 			AuditFile: auditFile,
 			AuditURL:  auditURL,
 		},
-		PrivateKeyPath: privateKeyPath,
+		PrivateKeyPath: *privateKeyPath,
 	}
 }
 
@@ -225,7 +223,6 @@ func LoadAgentConfig(args []string) AgentConfig {
 	hashKey := HashConfig{
 		Key: emptyString,
 	}
-	var publicKeyPath string
 
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
@@ -233,7 +230,7 @@ func LoadAgentConfig(args []string) AgentConfig {
 	pollInterval := flagSet.Uint("p", defaultPollInterval, "polling interval in seconds")
 	reportInterval := flagSet.Uint("r", defaultReportInterval, "report interval in seconds")
 	rateLimit := flagSet.Uint("l", 1, "rate limit for agent")
-	flag.StringVar(&publicKeyPath, "crypto-key", "", "Path to the public key for encryption")
+	publicKeyPath := flagSet.String("crypto-key", "", "Path to the public key for encryption")
 
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
@@ -267,10 +264,7 @@ func LoadAgentConfig(args []string) AgentConfig {
 	}
 
 	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
-		publicKeyPath = val
-		if publicKeyPath == "" {
-			log.Fatal().Msg("Public key path is empty")
-		}
+		*publicKeyPath = val
 	}
 
 	return AgentConfig{
@@ -279,6 +273,6 @@ func LoadAgentConfig(args []string) AgentConfig {
 		ReportInterval: time.Duration(*reportInterval) * time.Second,
 		HashConfig:     hashKey,
 		RateLimit:      *rateLimit,
-		PublicKeyPath:  publicKeyPath,
+		PublicKeyPath:  *publicKeyPath,
 	}
 }
