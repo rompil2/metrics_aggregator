@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -110,12 +111,72 @@ type ServerConfig struct {
 	PrivateKeyPath string
 }
 
+// ServerConfigJSON represents the JSON format for server config.
+type ServerConfigJSON struct {
+	Address       string `json:"address"`
+	Restore       bool   `json:"restore"`
+	StoreInterval string `json:"store_interval"`
+	StoreFile     string `json:"store_file"`
+	DatabaseDSN   string `json:"database_dsn"`
+	CryptoKey     string `json:"crypto_key"`
+}
+
+// AgentConfig contains all settings needed for the metrics collection agent,
+// including server address, polling/reporting intervals, rate limiting, and hashing key.
+type AgentConfig struct {
+	HashConfig
+	SocketConfig
+	PollInterval   time.Duration
+	ReportInterval time.Duration
+	RateLimit      uint
+	PublicKeyPath  string
+}
+
+// AgentConfigJSON represents the JSON format for agent config.
+type AgentConfigJSON struct {
+	Address        string `json:"address"`
+	ReportInterval string `json:"report_interval"`
+	PollInterval   string `json:"poll_interval"`
+	CryptoKey      string `json:"crypto_key"`
+}
+
+// LoadServerConfigFromFile loads server config from a JSON file.
+func LoadServerConfigFromFile(filename string) (*ServerConfigJSON, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var config ServerConfigJSON
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// LoadAgentConfigFromFile loads agent config from a JSON file.
+func LoadAgentConfigFromFile(filename string) (*AgentConfigJSON, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var config AgentConfigJSON
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
 // LoadServerConfig parses command-line flags and environment variables to build a ServerConfig.
 // It supports both CLI flags (e.g., -a, -k, -f) and corresponding environment variables (e.g., ADDRESS, KEY).
-// Environment variables take precedence over CLI defaults but not over explicit CLI arguments.
+// The priority order is: env > flags > config file.
 func LoadServerConfig(args []string) ServerConfig {
 	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
 
+	configFile := ""
 	socket := SocketConfig{
 		Host: defaultHost,
 		Port: defaultPort,
@@ -126,6 +187,23 @@ func LoadServerConfig(args []string) ServerConfig {
 	auditFile := Audit{}
 	auditURL := Audit{}
 
+	// Default values from config file (lowest priority)
+	var loadedConfig *ServerConfigJSON
+
+	// Check env var for config file first
+	envConfigFile := os.Getenv("CONFIG")
+	if envConfigFile != "" {
+		cfg, err := LoadServerConfigFromFile(envConfigFile)
+		if err != nil {
+			log.Warn().Str("config_file", envConfigFile).Err(err).Msg("Failed to load config from file")
+		} else {
+			loadedConfig = cfg
+		}
+	}
+
+	// Then check -c/-config flag
+	flagSet.StringVar(&configFile, "c", "", "Path to config file")
+	flagSet.StringVar(&configFile, "config", "", "Path to config file")
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
@@ -136,10 +214,56 @@ func LoadServerConfig(args []string) ServerConfig {
 	flagSet.Var(&auditURL, "audit-url", "--audit-url=<URL to an audit log service>")
 	privateKeyPath := flagSet.String("crypto-key", "", "Path to the private key for decryption")
 
+	// Parse flags (these have medium priority)
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
 	}
 
+	// Now load config file from flag if provided (overrides defaults but not env/flags)
+	if configFile != "" && loadedConfig == nil {
+		cfg, err := LoadServerConfigFromFile(configFile)
+		if err != nil {
+			log.Warn().Str("config_file", configFile).Err(err).Msg("Failed to load config from file")
+		} else {
+			loadedConfig = cfg
+		}
+	}
+
+	// Apply defaults from config file first
+	if loadedConfig != nil {
+		if socket.Host == defaultHost && socket.Port == defaultPort {
+			if loadedConfig.Address != "" {
+				socket.Set(loadedConfig.Address)
+			}
+		}
+		if *storeInterval == defaultStoreInterval {
+			if loadedConfig.StoreInterval != "" {
+				if dur, err := time.ParseDuration(loadedConfig.StoreInterval); err == nil {
+					*storeInterval = uint(dur.Seconds())
+				}
+			}
+		}
+		if *fileStoragePath == defaultFileStoragePath {
+			if loadedConfig.StoreFile != "" {
+				*fileStoragePath = loadedConfig.StoreFile
+			}
+		}
+		if *restore == defaultRestore {
+			*restore = loadedConfig.Restore
+		}
+		if *database == "" {
+			if loadedConfig.DatabaseDSN != "" {
+				*database = loadedConfig.DatabaseDSN
+			}
+		}
+		if *privateKeyPath == "" {
+			if loadedConfig.CryptoKey != "" {
+				*privateKeyPath = loadedConfig.CryptoKey
+			}
+		}
+	}
+
+	// Now apply environment variables (highest priority)
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
 		socket.Set(val)
 		log.Info().Str("ADDRESS", val).Send()
@@ -159,11 +283,11 @@ func LoadServerConfig(args []string) ServerConfig {
 
 	if val, ok := os.LookupEnv("RESTORE"); ok {
 		*restore = strings.ToLower(val) == "true"
-		log.Info().Bool("FILE_STORAGE_PATH", *restore).Send()
+		log.Info().Bool("RESTORE", *restore).Send()
 	}
 
 	if val, ok := os.LookupEnv("DATABASE_DSN"); ok {
-		*database = strings.ToLower(val)
+		*database = val
 		log.Info().Str("DATABASE_DSN", *database).Send()
 	}
 	if val, ok := os.LookupEnv("KEY"); ok {
@@ -199,23 +323,14 @@ func LoadServerConfig(args []string) ServerConfig {
 	}
 }
 
-// AgentConfig contains all settings needed for the metrics collection agent,
-// including server address, polling/reporting intervals, rate limiting, and hashing key.
-type AgentConfig struct {
-	HashConfig
-	SocketConfig
-	PollInterval   time.Duration
-	ReportInterval time.Duration
-	RateLimit      uint
-	PublicKeyPath  string
-}
-
 // LoadAgentConfig parses command-line arguments and environment variables to construct an AgentConfig.
 // It supports flags like -a (address), -k (hash key), -p (poll interval), -r (report interval),
 // and corresponding environment variables (ADDRESS, KEY, POLL_INTERVAL, etc.).
+// The priority order is: env > flags > config file.
 func LoadAgentConfig(args []string) AgentConfig {
 	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
 
+	configFile := ""
 	socket := SocketConfig{
 		Host: defaultHost,
 		Port: defaultPort,
@@ -224,6 +339,23 @@ func LoadAgentConfig(args []string) AgentConfig {
 		Key: emptyString,
 	}
 
+	// Default values from config file (lowest priority)
+	var loadedConfig *AgentConfigJSON
+
+	// Check env var for config file first
+	envConfigFile := os.Getenv("CONFIG")
+	if envConfigFile != "" {
+		cfg, err := LoadAgentConfigFromFile(envConfigFile)
+		if err != nil {
+			log.Warn().Str("config_file", envConfigFile).Err(err).Msg("Failed to load config from file")
+		} else {
+			loadedConfig = cfg
+		}
+	}
+
+	// Then check -c/-config flag
+	flagSet.StringVar(&configFile, "c", "", "Path to config file")
+	flagSet.StringVar(&configFile, "config", "", "Path to config file")
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 
@@ -232,10 +364,50 @@ func LoadAgentConfig(args []string) AgentConfig {
 	rateLimit := flagSet.Uint("l", 1, "rate limit for agent")
 	publicKeyPath := flagSet.String("crypto-key", "", "Path to the public key for encryption")
 
+	// Parse flags (medium priority)
 	if err := flagSet.Parse(args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
 	}
 
+	// Now load config file from flag if provided
+	if configFile != "" && loadedConfig == nil {
+		cfg, err := LoadAgentConfigFromFile(configFile)
+		if err != nil {
+			log.Warn().Str("config_file", configFile).Err(err).Msg("Failed to load config from file")
+		} else {
+			loadedConfig = cfg
+		}
+	}
+
+	// Apply defaults from config file first
+	if loadedConfig != nil {
+		if socket.Host == defaultHost && socket.Port == defaultPort {
+			if loadedConfig.Address != "" {
+				socket.Set(loadedConfig.Address)
+			}
+		}
+		if *reportInterval == defaultReportInterval {
+			if loadedConfig.ReportInterval != "" {
+				if dur, err := time.ParseDuration(loadedConfig.ReportInterval); err == nil {
+					*reportInterval = uint(dur.Seconds())
+				}
+			}
+		}
+		if *pollInterval == defaultPollInterval {
+			if loadedConfig.PollInterval != "" {
+				if dur, err := time.ParseDuration(loadedConfig.PollInterval); err == nil {
+					*pollInterval = uint(dur.Seconds())
+				}
+			}
+		}
+		if *publicKeyPath == "" {
+			if loadedConfig.CryptoKey != "" {
+				*publicKeyPath = loadedConfig.CryptoKey
+			}
+		}
+	}
+
+	// Now apply environment variables (highest priority)
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
 		socket.Set(val)
 		log.Info().Str("ADDRESS", val).Send()

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -230,178 +231,158 @@ func TestLoadAgentConfig(t *testing.T) {
 	}
 }
 
-// func TestGetEnvGeneral(t *testing.T) {
-// 	tests := []struct {
-// 		name        string
-// 		envVarName  string
-// 		envVarValue string
-// 		expected    interface{}
-// 		expectError bool
-// 	}{
-// 		{
-// 			name:        "string value",
-// 			envVarName:  "TEST_STRING",
-// 			envVarValue: "test_value",
-// 			expected:    "test_value",
-// 			expectError: false,
-// 		},
-// 		{
-// 			name:        "integer value",
-// 			envVarName:  "TEST_INT",
-// 			envVarValue: "42",
-// 			expected:    42,
-// 			expectError: false,
-// 		},
-// 		{
-// 			name:        "missing variable",
-// 			envVarName:  "NON_EXISTENT",
-// 			envVarValue: "",
-// 			expected:    0,
-// 			expectError: true,
-// 		},
-// 		{
-// 			name:        "invalid integer",
-// 			envVarName:  "INVALID_INT",
-// 			envVarValue: "not_a_number",
-// 			expected:    0,
-// 			expectError: true,
-// 		},
-// 	}
+func TestLoadServerConfigFromFile(t *testing.T) {
+	// Valid config data
+	validConfig := ServerConfigJSON{
+		Address:       "localhost:8080",
+		Restore:       true,
+		StoreInterval: "1",
+		StoreFile:     "/tmp/restreFile",
+		DatabaseDSN:   "postgres://localhost:9092",
+		CryptoKey:     "private.key",
+	}
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			if tt.envVarValue != "" {
-// 				os.Setenv(tt.envVarName, tt.envVarValue)
-// 				defer os.Unsetenv(tt.envVarName)
-// 			}
+	// Create a temporary directory
+	tmpDir := t.TempDir()
 
-// 			// Тестируем для string
-// 			if str, ok := tt.expected.(string); ok {
-// 				result, err := getEnvGeneral[string](tt.envVarName)
-// 				if tt.expectError {
-// 					assert.Error(t, err)
-// 				} else {
-// 					assert.NoError(t, err)
-// 					assert.Equal(t, str, result)
-// 				}
-// 			}
+	validFile := tmpDir + "/valid_config.json"
+	invalidFile := tmpDir + "/invalid_config.json"
+	missingFile := tmpDir + "/missing.json"
+	emptyFile := tmpDir + "/empty.json"
 
-// 			// Тестируем для int
-// 			if num, ok := tt.expected.(int); ok {
-// 				result, err := getEnvGeneral[int](tt.envVarName)
-// 				if tt.expectError {
-// 					assert.Error(t, err)
-// 				} else {
-// 					assert.NoError(t, err)
-// 					assert.Equal(t, num, result)
-// 				}
-// 			}
-// 		})
-// 	}
-// }
+	// Write valid JSON
+	data, _ := json.Marshal(validConfig)
+	err := os.WriteFile(validFile, data, 0644)
+	assert.NoError(t, err)
 
-// func TestGetEnvWithDefaults(t *testing.T) {
-// 	tests := []struct {
-// 		name         string
-// 		envVarName   string
-// 		envVarValue  string
-// 		defaultValue any
-// 		expected     any
-// 	}{
-// 		{
-// 			name:         "string with default",
-// 			envVarName:   "MISSING_STRING",
-// 			envVarValue:  "",
-// 			defaultValue: "default",
-// 			expected:     "default",
-// 		},
-// 		{
-// 			name:         "string with value",
-// 			envVarName:   "EXISTING_STRING",
-// 			envVarValue:  "actual",
-// 			defaultValue: "default",
-// 			expected:     "actual",
-// 		},
-// 		{
-// 			name:         "uint with default",
-// 			envVarName:   "MISSING_UINT",
-// 			envVarValue:  "",
-// 			defaultValue: uint(999),
-// 			expected:     uint(999),
-// 		},
-// 		{
-// 			name:         "uint with value",
-// 			envVarName:   "EXISTING_UINT",
-// 			envVarValue:  "123",
-// 			defaultValue: uint(999),
-// 			expected:     uint(123),
-// 		},
-// 	}
+	// Write invalid JSON
+	err = os.WriteFile(invalidFile, []byte("{ invalid json }"), 0644)
+	assert.NoError(t, err)
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			if tt.envVarValue != "" {
-// 				os.Setenv(tt.envVarName, tt.envVarValue)
-// 				defer os.Unsetenv(tt.envVarName)
-// 			}
+	// Write empty file
+	err = os.WriteFile(emptyFile, []byte{}, 0644)
+	assert.NoError(t, err)
 
-// 			// Тестируем для string
-// 			if str, ok := tt.expected.(string); ok {
-// 				defaultVal := tt.defaultValue.(string)
-// 				result := getEnvWithDefaults[string](tt.envVarName, defaultVal)
-// 				assert.Equal(t, str, result)
-// 			}
+	tests := []struct {
+		name       string
+		filename   string
+		wantConfig *ServerConfigJSON
+		wantErr    bool
+	}{
+		{
+			name:       "valid config file",
+			filename:   validFile,
+			wantConfig: &validConfig,
+			wantErr:    false,
+		},
+		{
+			name:       "file not found",
+			filename:   missingFile,
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name:       "invalid json",
+			filename:   invalidFile,
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name:       "empty file",
+			filename:   emptyFile,
+			wantConfig: nil,
+			wantErr:    true, // because unmarshal fails on empty input
+		},
+	}
 
-// 			// Тестируем для uint
-// 			if num, ok := tt.expected.(uint); ok {
-// 				defaultVal := tt.defaultValue.(uint)
-// 				result := getEnvWithDefaults[uint](tt.envVarName, defaultVal)
-// 				assert.Equal(t, num, result)
-// 			}
-// 		})
-// 	}
-// }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := LoadServerConfigFromFile(tt.filename)
 
-// func TestGetEnvDuration(t *testing.T) {
-// 	tests := []struct {
-// 		name         string
-// 		envVarName   string
-// 		envVarValue  string
-// 		defaultValue time.Duration
-// 		expected     time.Duration
-// 	}{
-// 		{
-// 			name:         "valid duration",
-// 			envVarName:   "TEST_DURATION",
-// 			envVarValue:  "1s",
-// 			defaultValue: 2 * time.Second,
-// 			expected:     1 * time.Second,
-// 		},
-// 		{
-// 			name:         "invalid duration",
-// 			envVarName:   "INVALID_DURATION",
-// 			envVarValue:  "not_a_duration",
-// 			defaultValue: time.Hour,
-// 			expected:     time.Hour,
-// 		},
-// 		{
-// 			name:         "missing variable",
-// 			envVarName:   "MISSING_DURATION",
-// 			envVarValue:  "",
-// 			defaultValue: time.Minute,
-// 			expected:     time.Minute,
-// 		},
-// 	}
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, config)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantConfig, config)
+			}
+		})
+	}
+}
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			if tt.envVarValue != "" {
-// 				os.Setenv(tt.envVarName, tt.envVarValue)
-// 				defer os.Unsetenv(tt.envVarName)
-// 			}
+func TestLoadAgentConfigFromFile(t *testing.T) {
+	// Valid config data
+	validConfig := AgentConfigJSON{
+		Address:        "localhost:8080",
+		ReportInterval: "1",
+		PollInterval:   "1",
+		CryptoKey:      "private.key",
+	}
 
-// 			result := getEnvDuration(tt.envVarName, tt.defaultValue)
-// 			assert.Equal(t, tt.expected, result)
-// 		})
-// 	}
-// }
+	// Create a temporary directory
+	tmpDir := t.TempDir()
+
+	validFile := tmpDir + "/valid_config.json"
+	invalidFile := tmpDir + "/invalid_config.json"
+	missingFile := tmpDir + "/missing.json"
+	emptyFile := tmpDir + "/empty.json"
+
+	// Write valid JSON
+	data, _ := json.Marshal(validConfig)
+	err := os.WriteFile(validFile, data, 0644)
+	assert.NoError(t, err)
+
+	// Write invalid JSON
+	err = os.WriteFile(invalidFile, []byte("{ invalid json }"), 0644)
+	assert.NoError(t, err)
+
+	// Write empty file
+	err = os.WriteFile(emptyFile, []byte{}, 0644)
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		filename   string
+		wantConfig *AgentConfigJSON
+		wantErr    bool
+	}{
+		{
+			name:       "valid config file",
+			filename:   validFile,
+			wantConfig: &validConfig,
+			wantErr:    false,
+		},
+		{
+			name:       "file not found",
+			filename:   missingFile,
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name:       "invalid json",
+			filename:   invalidFile,
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name:       "empty file",
+			filename:   emptyFile,
+			wantConfig: nil,
+			wantErr:    true, // because unmarshal fails on empty input
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := LoadAgentConfigFromFile(tt.filename)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, config)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantConfig, config)
+			}
+		})
+	}
+}
