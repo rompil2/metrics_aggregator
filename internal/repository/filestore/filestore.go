@@ -1,3 +1,5 @@
+// Package filestore provides a file-based storage implementation for metrics data.
+// path: internal/repository/filestore
 package filestore
 
 import (
@@ -14,19 +16,26 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/repository"
 )
 
+// Repo is an alias for the repository.Repo interface, used to embed storage operations.
 type Repo = repository.Repo
+
+// Store implements a file-backed metrics repository that periodically persists data to disk.
+// It supports both interval-based and event-driven saving strategies, and ensures safe concurrent access.
 type Store struct {
 	Repo
-	storeFilePath string
-	interval      time.Duration
 	cancel        context.CancelFunc
 	synchroCh     chan struct{}
+	storeFilePath string
 	wg            sync.WaitGroup
+	interval      time.Duration
 	mu            sync.RWMutex
 }
 
 var log = logger.Get()
 
+// NewFileStore creates a new file-backed metrics store with the given repository and configuration.
+// If Restore is enabled in the config, it attempts to load existing metrics from the storage file.
+// The store starts a background goroutine for periodic or synchronous saving based on the interval setting.
 func NewFileStore(repo Repo, cfg config.StoreConfig) (*Store, error) {
 	st := &Store{
 		Repo:          repo,
@@ -50,6 +59,8 @@ func NewFileStore(repo Repo, cfg config.StoreConfig) (*Store, error) {
 	return st, nil
 }
 
+// SetMetrics stores a metric by ID and triggers an asynchronous save if the store is configured for event-driven persistence.
+// It is safe for concurrent use.
 func (st *Store) SetMetrics(ID string, value model.Metrics) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -68,6 +79,9 @@ func (st *Store) SetMetrics(ID string, value model.Metrics) error {
 	return nil
 }
 
+// Restore loads all metrics from the configured file path into the underlying repository.
+// It expects a JSON array of metrics. If the file does not exist, it returns nil (no error).
+// This method is typically called during initialization when Restore is enabled.
 func (st *Store) Restore() error {
 	file, err := os.OpenFile(st.storeFilePath, os.O_RDONLY, 0644)
 	if err != nil {
@@ -104,11 +118,16 @@ func (st *Store) Restore() error {
 	return nil
 }
 
+// Close stops the background saving goroutine and waits for it to finish.
+// It also triggers a final save of all metrics to ensure durability on shutdown.
 func (st *Store) Close() {
 	st.cancel()
 	st.wg.Wait()
 }
 
+// Save runs a background loop that persists metrics to disk either periodically (if interval > 0)
+// or in response to write events (if interval == 0). It uses atomic file replacement via a temporary file
+// to ensure data integrity. This method is started automatically by NewFileStore and should not be called directly.
 func (st *Store) Save(ctx context.Context) {
 	defer st.wg.Done()
 

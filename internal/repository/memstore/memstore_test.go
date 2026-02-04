@@ -16,12 +16,12 @@ func TestNewMemStorage(t *testing.T) {
 
 func TestMemStorage_SetMetrics(t *testing.T) {
 	tt := []struct {
+		setup   func(*MemStorage)
+		metric  model.Metrics
 		name    string
 		id      string
-		metric  model.Metrics
-		wantErr bool
 		errMsg  string
-		setup   func(*MemStorage)
+		wantErr bool
 	}{
 		{
 			name: "Set gauge metric",
@@ -127,12 +127,12 @@ func TestMemStorage_SetMetrics(t *testing.T) {
 
 func TestMemStorage_GetMetrics(t *testing.T) {
 	tt := []struct {
-		name    string
-		id      string
 		setup   func(*MemStorage)
 		want    model.Metrics
-		wantErr bool
+		name    string
+		id      string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "Get existing metric",
@@ -190,8 +190,8 @@ func TestMemStorage_GetMetrics(t *testing.T) {
 
 func TestMemStorage_GetAllMetrics(t *testing.T) {
 	tests := []struct {
-		name    string
 		setup   func(*MemStorage)
+		name    string
 		wantLen int
 		wantErr bool
 	}{
