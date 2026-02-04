@@ -59,7 +59,7 @@ func main() {
 
 	// Ожидание сигнала завершения
 	stop := make(chan os.Signal, sigterChSize)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	<-stop
 
 	log.Println("Shutting down...")
