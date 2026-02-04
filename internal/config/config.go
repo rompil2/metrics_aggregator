@@ -248,8 +248,7 @@ func LoadServerConfig(args []string) ServerConfig {
 				*fileStoragePath = loadedConfig.StoreFile
 			}
 		}
-		//nolint:gosimple
-		if *restore == defaultRestore {
+		if !*restore {
 			*restore = loadedConfig.Restore
 		}
 		if *database == "" {
