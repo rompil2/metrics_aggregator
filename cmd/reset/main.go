@@ -71,8 +71,18 @@ func scanAndGenerate(rootDir string) error {
 		return err
 	}
 
-	allPackages := make(map[string]*PackageInfo)
+	// Choose all packages
+	loadedPackages := filterLoadedPackages(pkgs)
 
+	// Extract target structs
+	allPackages := extractTargetStructs(loadedPackages)
+
+	// Generate code and write to files
+	return generateAndWriteFiles(allPackages)
+}
+
+func filterLoadedPackages(pkgs []*packages.Package) []*packages.Package {
+	var validPkgs []*packages.Package
 	for _, pkg := range pkgs {
 		if pkg.Errors != nil {
 			for _, err := range pkg.Errors {
@@ -80,8 +90,15 @@ func scanAndGenerate(rootDir string) error {
 			}
 			continue
 		}
+		validPkgs = append(validPkgs, pkg)
+	}
+	return validPkgs
+}
 
-		// Use directory instead of PkgPath to match with file paths
+func extractTargetStructs(pkgs []*packages.Package) map[string]*PackageInfo {
+	allPackages := make(map[string]*PackageInfo)
+
+	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
 			for _, decl := range file.Decls {
 				gen, ok := decl.(*ast.GenDecl)
@@ -128,6 +145,10 @@ func scanAndGenerate(rootDir string) error {
 		}
 	}
 
+	return allPackages
+}
+
+func generateAndWriteFiles(allPackages map[string]*PackageInfo) error {
 	tmpl := template.Must(template.New("reset").Parse(resetTemplateText))
 
 	for pkgPath, pkgInfo := range allPackages {
@@ -138,7 +159,7 @@ func scanAndGenerate(rootDir string) error {
 		outputPath := filepath.Join(pkgPath, "reset.gen.go")
 
 		var buf strings.Builder
-		err = tmpl.Execute(&buf, pkgInfo)
+		err := tmpl.Execute(&buf, pkgInfo)
 		if err != nil {
 			return err
 		}
@@ -154,7 +175,6 @@ func scanAndGenerate(rootDir string) error {
 		}
 
 		fmt.Printf("Generated %s\n", outputPath)
-
 	}
 
 	return nil
@@ -223,7 +243,6 @@ func resetExpressionForType(targetVar string, typ types.Type) string {
 		pkg := named.Obj().Pkg()
 		if pkg != nil {
 			typName = named.Obj().Name()
-
 		}
 	}
 	switch u := typ.Underlying().(type) {
