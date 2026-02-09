@@ -213,7 +213,7 @@ producerLoop:
 		}
 		// encode data with public key if it is set
 		if h.publicKey != nil {
-			buf, err = h.encriptData(buf)
+			buf, err = h.encryptData(buf)
 			if err != nil {
 				return fmt.Errorf("encoding data: %w", err)
 			}
@@ -276,7 +276,7 @@ func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) erro
 
 	// encode data with public key if it is set
 	if h.publicKey != nil {
-		jsonData, err = h.encriptData(jsonData)
+		jsonData, err = h.encryptData(jsonData)
 		if err != nil {
 			return fmt.Errorf("encoding data: %w", err)
 		}
@@ -482,6 +482,6 @@ func (p *HTTPMetricProcessor) MarshalMetric(metric model.Metrics) ([]byte, error
 	return json.Marshal(metric)
 }
 
-func (h *HTTPClient) encriptData(data []byte) ([]byte, error) {
+func (h *HTTPClient) encryptData(data []byte) ([]byte, error) {
 	return crypto.EncryptWithPublicKey(h.publicKey, data)
 }
