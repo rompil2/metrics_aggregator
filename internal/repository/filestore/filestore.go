@@ -44,7 +44,7 @@ func NewFileStore(repo Repo, cfg config.StoreConfig) (*Store, error) {
 		synchroCh:     make(chan struct{}),
 	}
 
-	if cfg.Restore {
+	if cfg.Restore != nil && *(cfg.Restore) {
 		if err := st.Restore(); err != nil {
 			return nil, err
 		}

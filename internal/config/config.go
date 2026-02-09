@@ -19,14 +19,15 @@ import (
 var log = logger.Get()
 
 const (
-	defaultHost            = "localhost"
-	defaultPort            = 8080
-	defaultPollInterval    = 2
-	defaultReportInterval  = 10
-	defaultStoreInterval   = 300
-	defaultFileStoragePath = "./storage.txt"
-	defaultRestore         = false
-	emptyString            = ""
+	defaultHost                 = "localhost"
+	defaultPort                 = 8080
+	defaultPollInterval    uint = 2
+	defaultReportInterval  uint = 10
+	defaultStoreInterval   uint = 300
+	defaultFileStoragePath      = "./storage.txt"
+	defaultRestore              = false
+	defaultRateLimit            = 1
+	emptyString                 = ""
 )
 
 // SocketConfig represents a network address configuration with host and port.
@@ -98,7 +99,7 @@ type StoreConfig struct {
 	FileStoragePath string
 	DBConnStr       string
 	StoreInterval   time.Duration
-	Restore         bool
+	Restore         *bool
 }
 
 // ServerConfig combines all configuration parameters required to run the metrics server,
@@ -170,157 +171,319 @@ func LoadAgentConfigFromFile(filename string) (*AgentConfigJSON, error) {
 	return &config, nil
 }
 
-// LoadServerConfig parses command-line flags and environment variables to build a ServerConfig.
-// It supports both CLI flags (e.g., -a, -k, -f) and corresponding environment variables (e.g., ADDRESS, KEY).
-// The priority order is: env > flags > config file.
-func LoadServerConfig(args []string) ServerConfig {
+// ConfigLoader manages loading configuration from multiple sources.
+type ConfigLoader struct {
+	args []string
+}
+
+func NewConfigLoader(args []string) *ConfigLoader {
+	return &ConfigLoader{args: args}
+}
+
+func (cl *ConfigLoader) LoadServerConfig() ServerConfig {
+	defaults := cl.getDefaultServerConfig()
+	fromFile := cl.loadServerConfigFromFile()
+	fromFlags := cl.parseServerFlags()
+	fromEnv := cl.getServerEnvConfig()
+
+	merged := cl.mergeServerConfigs(defaults, fromFile, fromFlags, fromEnv)
+
+	return ServerConfig{
+		SocketConfig: merged.SocketConfig,
+		StoreConfig: StoreConfig{
+			StoreInterval:   merged.StoreInterval,
+			FileStoragePath: merged.FileStoragePath,
+			Restore:         merged.Restore,
+			DBConnStr:       merged.DBConnStr,
+		},
+		HashConfig:     merged.HashConfig,
+		AuditConfig:    merged.AuditConfig,
+		PrivateKeyPath: merged.PrivateKeyPath,
+	}
+}
+
+func (cl *ConfigLoader) getDefaultServerConfig() *serverConfigValues {
+	return &serverConfigValues{
+		SocketConfig: SocketConfig{
+			Host: defaultHost,
+			Port: defaultPort,
+		},
+		HashConfig: HashConfig{Key: emptyString},
+		StoreConfig: StoreConfig{
+			StoreInterval:   time.Duration(defaultStoreInterval) * time.Second,
+			FileStoragePath: defaultFileStoragePath,
+			Restore:         nil,
+		},
+		AuditConfig: AuditConfig{
+			AuditFile: Audit{},
+			AuditURL:  Audit{},
+		},
+		PrivateKeyPath: emptyString,
+	}
+}
+
+type serverConfigValues struct {
+	SocketConfig
+	HashConfig
+	StoreConfig
+	AuditConfig
+	PrivateKeyPath string
+}
+
+func (cl *ConfigLoader) loadServerConfigFromFile() *serverConfigValues {
+	envConfigFile := os.Getenv("CONFIG")
+	if envConfigFile != emptyString {
+		cfg, err := LoadServerConfigFromFile(envConfigFile)
+		if err != nil {
+			log.Warn().Str("config_file", envConfigFile).Err(err).Msg("Failed to load config from file")
+			return nil
+		}
+		return cl.serverConfigJSONToValues(cfg)
+	}
+
+	// Also check -c/-config flag for config file path only
+	tempFlagSet := flag.NewFlagSet(emptyString, flag.ContinueOnError)
+	configFile := tempFlagSet.String("c", emptyString, "Path to config file")
+	tempFlagSet.StringVar(configFile, "config", emptyString, "Path to config file")
+	tempFlagSet.Parse(cl.args)
+
+	if *configFile != emptyString {
+		cfg, err := LoadServerConfigFromFile(*configFile)
+		if err != nil {
+			log.Warn().Str("config_file", *configFile).Err(err).Msg("Failed to load config from file")
+			return nil
+		}
+		return cl.serverConfigJSONToValues(cfg)
+	}
+
+	return nil
+}
+
+func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverConfigValues {
+	if cfg == nil {
+		return nil
+	}
+
+	storeInterval := defaultStoreInterval
+	if cfg.StoreInterval != emptyString {
+		if dur, err := strconv.ParseUint(cfg.StoreInterval, 10, 32); err == nil {
+			storeInterval = uint(dur)
+		}
+	}
+
+	return &serverConfigValues{
+		SocketConfig: SocketConfig{
+			Host: defaultHost,
+			Port: defaultPort,
+		},
+		StoreConfig: StoreConfig{
+			StoreInterval:   time.Duration(storeInterval) * time.Second,
+			FileStoragePath: cfg.StoreFile,
+			Restore:         &(cfg.Restore),
+			DBConnStr:       cfg.DatabaseDSN,
+		},
+		AuditConfig: AuditConfig{
+			AuditFile: Audit{auditSink: emptyString},
+			AuditURL:  Audit{auditSink: emptyString},
+		},
+		PrivateKeyPath: cfg.CryptoKey,
+	}
+}
+
+func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
 
-	configFile := ""
+	configFile := emptyString
 	socket := SocketConfig{
 		Host: defaultHost,
 		Port: defaultPort,
 	}
-	hashKey := HashConfig{
-		Key: emptyString,
-	}
+	hashKey := HashConfig{Key: emptyString}
 	auditFile := Audit{}
 	auditURL := Audit{}
 
-	// Default values from config file (lowest priority)
-	var loadedConfig *ServerConfigJSON
-
-	// Check env var for config file first
-	envConfigFile := os.Getenv("CONFIG")
-	if envConfigFile != "" {
-		cfg, err := LoadServerConfigFromFile(envConfigFile)
-		if err != nil {
-			log.Warn().Str("config_file", envConfigFile).Err(err).Msg("Failed to load config from file")
-		} else {
-			loadedConfig = cfg
-		}
-	}
-
-	// Then check -c/-config flag
-	flagSet.StringVar(&configFile, "c", "", "Path to config file")
-	flagSet.StringVar(&configFile, "config", "", "Path to config file")
-	flagSet.Var(&socket, "a", "-a=<host>:<port>")
-	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
 	fileStoragePath := flagSet.String("f", defaultFileStoragePath, "path to a file to store data")
 	restore := flagSet.Bool("r", defaultRestore, "should restore data")
-	database := flagSet.String("d", "", "A DB connection string")
+	if !*restore {
+		restore = nil
+	}
+	database := flagSet.String("d", emptyString, "A DB connection string")
+	privateKeyPath := flagSet.String("crypto-key", emptyString, "Path to the private key for decryption")
+
+	flagSet.StringVar(&configFile, "c", emptyString, "Path to config file")
+	flagSet.StringVar(&configFile, "config", emptyString, "Path to config file")
+	flagSet.Var(&socket, "a", "-a=<host>:<port>")
+	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 	flagSet.Var(&auditFile, "audit-file", "--audit-file=<path to an audit log file>")
 	flagSet.Var(&auditURL, "audit-url", "--audit-url=<URL to an audit log service>")
-	privateKeyPath := flagSet.String("crypto-key", "", "Path to the private key for decryption")
 
-	// Parse flags (these have medium priority)
-	if err := flagSet.Parse(args); err != nil {
+	if err := flagSet.Parse(cl.args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
 	}
 
-	// Now load config file from flag if provided (overrides defaults but not env/flags)
-	if configFile != "" && loadedConfig == nil {
-		cfg, err := LoadServerConfigFromFile(configFile)
-		if err != nil {
-			log.Warn().Str("config_file", configFile).Err(err).Msg("Failed to load config from file")
-		} else {
-			loadedConfig = cfg
-		}
+	return &serverConfigValues{
+		SocketConfig: socket,
+		HashConfig:   hashKey,
+		StoreConfig: StoreConfig{
+			StoreInterval:   time.Duration(*storeInterval) * time.Second,
+			FileStoragePath: *fileStoragePath,
+			Restore:         restore,
+			DBConnStr:       *database,
+		},
+		AuditConfig:    AuditConfig{AuditFile: auditFile, AuditURL: auditURL},
+		PrivateKeyPath: *privateKeyPath,
 	}
+}
 
-	// Apply defaults from config file first
-	if loadedConfig != nil {
-		if socket.Host == defaultHost && socket.Port == defaultPort {
-			if loadedConfig.Address != "" {
-				socket.Set(loadedConfig.Address)
-			}
-		}
-		if *storeInterval == defaultStoreInterval {
-			if loadedConfig.StoreInterval != "" {
-				if dur, err := time.ParseDuration(loadedConfig.StoreInterval); err == nil {
-					*storeInterval = uint(dur.Seconds())
-				}
-			}
-		}
-		if *fileStoragePath == defaultFileStoragePath {
-			if loadedConfig.StoreFile != "" {
-				*fileStoragePath = loadedConfig.StoreFile
-			}
-		}
-		if !*restore {
-			*restore = loadedConfig.Restore
-		}
-		if *database == "" {
-			if loadedConfig.DatabaseDSN != "" {
-				*database = loadedConfig.DatabaseDSN
-			}
-		}
-		if *privateKeyPath == "" {
-			if loadedConfig.CryptoKey != "" {
-				*privateKeyPath = loadedConfig.CryptoKey
-			}
-		}
-	}
+func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
+	defConfig := cl.getDefaultServerConfig()
 
-	// Now apply environment variables (highest priority)
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
-		socket.Set(val)
+		defConfig.SocketConfig.Set(val)
 		log.Info().Str("ADDRESS", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("STORE_INTERVAL"); ok {
 		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
-			*storeInterval = uint(parsed)
+			defConfig.StoreInterval = time.Duration(uint(parsed)) * time.Second
 			log.Info().Str("STORE_INTERVAL", val).Send()
 		}
 	}
 
 	if val, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
-		*fileStoragePath = val
+		defConfig.FileStoragePath = val
 		log.Info().Str("FILE_STORAGE_PATH", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("RESTORE"); ok {
-		*restore = strings.ToLower(val) == "true"
-		log.Info().Bool("RESTORE", *restore).Send()
+		defConfig.Restore = new(bool)
+		*(defConfig.Restore) = strings.ToLower(val) == "true"
+		log.Info().Bool("RESTORE", *(defConfig.Restore)).Send()
 	}
 
 	if val, ok := os.LookupEnv("DATABASE_DSN"); ok {
-		*database = val
-		log.Info().Str("DATABASE_DSN", *database).Send()
-	}
-	if val, ok := os.LookupEnv("KEY"); ok {
-		hashKey.Set(val)
-		log.Info().Str("KEY", val).Send()
-	}
-	if val, ok := os.LookupEnv("AUDIT_FILE"); ok {
-		auditFile.Set(val)
-		log.Info().Str("AUDIT_FILE", val).Send()
-	}
-	if val, ok := os.LookupEnv("AUDIT_URL"); ok {
-		auditURL.Set(val)
-		log.Info().Str("AUDIT_URL", val).Send()
-	}
-	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
-		*privateKeyPath = val
+		defConfig.DBConnStr = val
+		log.Info().Str("DATABASE_DSN", defConfig.DBConnStr).Send()
 	}
 
-	return ServerConfig{
-		SocketConfig: socket,
-		StoreConfig: StoreConfig{
-			StoreInterval:   time.Duration(*storeInterval) * time.Second,
-			FileStoragePath: *fileStoragePath,
-			Restore:         *restore,
-			DBConnStr:       *database,
-		},
-		HashConfig: hashKey,
-		AuditConfig: AuditConfig{
-			AuditFile: auditFile,
-			AuditURL:  auditURL,
-		},
-		PrivateKeyPath: *privateKeyPath,
+	if val, ok := os.LookupEnv("KEY"); ok {
+		defConfig.HashConfig.Set(val)
+		log.Info().Str("KEY", val).Send()
 	}
+
+	if val, ok := os.LookupEnv("AUDIT_FILE"); ok {
+		defConfig.AuditFile.Set(val)
+		log.Info().Str("AUDIT_FILE", val).Send()
+	}
+
+	if val, ok := os.LookupEnv("AUDIT_URL"); ok {
+		defConfig.AuditURL.Set(val)
+		log.Info().Str("AUDIT_URL", val).Send()
+	}
+
+	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
+		defConfig.PrivateKeyPath = val
+	}
+
+	return defConfig
+
+}
+
+func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEnv *serverConfigValues) *serverConfigValues {
+	merged := *defaults
+
+	// Apply from file if not default
+	if fromFile != nil {
+		if merged.SocketConfig.Host == defaultHost && merged.SocketConfig.Port == defaultPort {
+			merged.SocketConfig = fromFile.SocketConfig
+		}
+		if merged.StoreConfig.StoreInterval.Seconds() == float64(defaultStoreInterval) {
+			merged.StoreConfig.StoreInterval = fromFile.StoreConfig.StoreInterval
+		}
+		if merged.StoreConfig.FileStoragePath == defaultFileStoragePath {
+			merged.StoreConfig.FileStoragePath = fromFile.StoreConfig.FileStoragePath
+		}
+		if merged.StoreConfig.Restore != nil {
+			merged.StoreConfig.Restore = fromFile.StoreConfig.Restore
+		}
+		if merged.StoreConfig.DBConnStr == emptyString {
+			merged.StoreConfig.DBConnStr = fromFile.StoreConfig.DBConnStr
+		}
+		if merged.PrivateKeyPath == emptyString {
+			merged.PrivateKeyPath = fromFile.PrivateKeyPath
+		}
+	}
+
+	// Apply from flags if not default
+	if fromFlags != nil {
+		// merged.SocketConfig = fromFlags.SocketConfig
+		// merged.HashConfig = fromFlags.HashConfig
+		// merged.StoreConfig = fromFlags.StoreConfig
+		// merged.AuditConfig = fromFlags.AuditConfig
+		// merged.PrivateKeyPath = fromFlags.PrivateKeyPath
+		if fromFlags.SocketConfig.Host != defaultHost || fromFlags.SocketConfig.Port != defaultPort {
+			merged.SocketConfig = fromFlags.SocketConfig
+		}
+		merged.HashConfig = fromFlags.HashConfig
+		if fromFlags.StoreConfig.StoreInterval.Seconds() != float64(defaultStoreInterval) {
+			merged.StoreConfig.StoreInterval = fromFlags.StoreConfig.StoreInterval
+		}
+		if fromFlags.StoreConfig.FileStoragePath != defaultFileStoragePath {
+			merged.StoreConfig.FileStoragePath = fromFlags.StoreConfig.FileStoragePath
+		}
+		if fromFlags.StoreConfig.Restore != nil {
+			merged.StoreConfig.Restore = fromFlags.StoreConfig.Restore
+		}
+		if fromFlags.StoreConfig.DBConnStr != emptyString {
+			merged.StoreConfig.DBConnStr = fromFlags.StoreConfig.DBConnStr
+		}
+		merged.AuditConfig = fromFlags.AuditConfig
+		if fromFlags.PrivateKeyPath != emptyString {
+			merged.PrivateKeyPath = fromFlags.PrivateKeyPath
+		}
+	}
+
+	// Apply from env (highest priority)
+	if fromEnv != nil {
+		if fromEnv.SocketConfig.Host != defaultHost || fromEnv.SocketConfig.Port != defaultPort {
+			merged.SocketConfig = fromEnv.SocketConfig
+		}
+		if fromEnv.HashConfig.Key != emptyString {
+			merged.HashConfig = fromEnv.HashConfig
+		}
+		if fromEnv.StoreConfig.StoreInterval.Seconds() != float64(defaultStoreInterval) {
+			merged.StoreConfig.StoreInterval = fromEnv.StoreConfig.StoreInterval
+		}
+		if fromEnv.StoreConfig.FileStoragePath != defaultFileStoragePath {
+			merged.StoreConfig.FileStoragePath = fromEnv.StoreConfig.FileStoragePath
+		}
+		if fromEnv.StoreConfig.Restore != nil {
+			merged.StoreConfig.Restore = fromEnv.StoreConfig.Restore
+		}
+		if fromEnv.StoreConfig.DBConnStr != emptyString {
+			merged.StoreConfig.DBConnStr = fromEnv.StoreConfig.DBConnStr
+		}
+		if fromEnv.AuditConfig.AuditFile.String() != emptyString {
+			merged.AuditConfig.AuditFile = fromEnv.AuditConfig.AuditFile
+		}
+		if fromEnv.AuditConfig.AuditURL.String() != emptyString {
+			merged.AuditConfig.AuditURL = fromEnv.AuditConfig.AuditURL
+		}
+		if fromEnv.PrivateKeyPath != emptyString {
+			merged.PrivateKeyPath = fromEnv.PrivateKeyPath
+		}
+	}
+
+	return &merged
+}
+
+// LoadServerConfig parses command-line flags and environment variables to build a ServerConfig.
+// It supports both CLI flags (e.g., -a, -k, -f) and corresponding environment variables (e.g., ADDRESS, KEY).
+// The priority order is: env > flags > config file.
+func LoadServerConfig(args []string) ServerConfig {
+	loader := NewConfigLoader(args)
+	return loader.LoadServerConfig()
 }
 
 // LoadAgentConfig parses command-line arguments and environment variables to construct an AgentConfig.
@@ -328,123 +491,240 @@ func LoadServerConfig(args []string) ServerConfig {
 // and corresponding environment variables (ADDRESS, KEY, POLL_INTERVAL, etc.).
 // The priority order is: env > flags > config file.
 func LoadAgentConfig(args []string) AgentConfig {
+	loader := NewConfigLoader(args)
+	return loader.LoadAgentConfig()
+}
+
+func (cl *ConfigLoader) LoadAgentConfig() AgentConfig {
+	defaults := cl.getDefaultAgentConfig()
+	fromFile := cl.loadAgentConfigFromFile()
+	fromFlags := cl.parseAgentFlags()
+	fromEnv := cl.getAgentEnvConfig()
+
+	merged := cl.mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv)
+
+	return AgentConfig{
+		SocketConfig:   merged.SocketConfig,
+		PollInterval:   time.Duration(merged.PollInterval) * time.Second,
+		ReportInterval: time.Duration(merged.ReportInterval) * time.Second,
+		HashConfig:     merged.HashConfig,
+		RateLimit:      merged.RateLimit,
+		PublicKeyPath:  merged.PublicKeyPath,
+	}
+}
+
+func (cl *ConfigLoader) getDefaultAgentConfig() *agentConfigValues {
+	return &agentConfigValues{
+		SocketConfig: SocketConfig{
+			Host: defaultHost,
+			Port: defaultPort,
+		},
+		HashConfig:     HashConfig{Key: emptyString},
+		PollInterval:   defaultPollInterval,
+		ReportInterval: defaultReportInterval,
+		RateLimit:      defaultRateLimit,
+		PublicKeyPath:  emptyString,
+	}
+}
+
+type agentConfigValues struct {
+	SocketConfig
+	HashConfig
+	PollInterval   uint
+	ReportInterval uint
+	RateLimit      uint
+	PublicKeyPath  string
+}
+
+func (cl *ConfigLoader) loadAgentConfigFromFile() *agentConfigValues {
+	envConfigFile := os.Getenv("CONFIG")
+	if envConfigFile != emptyString {
+		cfg, err := LoadAgentConfigFromFile(envConfigFile)
+		if err != nil {
+			log.Warn().Str("config_file", envConfigFile).Err(err).Msg("Failed to load config from file")
+			return nil
+		}
+		return cl.agentConfigJSONToValues(cfg)
+	}
+
+	// Also check -c/-config flag for config file path only
+	tempFlagSet := flag.NewFlagSet(emptyString, flag.ContinueOnError)
+	configFile := tempFlagSet.String("c", emptyString, "Path to config file")
+	tempFlagSet.StringVar(configFile, "config", emptyString, "Path to config file")
+	tempFlagSet.Parse(cl.args)
+
+	if *configFile != emptyString {
+		cfg, err := LoadAgentConfigFromFile(*configFile)
+		if err != nil {
+			log.Warn().Str("config_file", *configFile).Err(err).Msg("Failed to load config from file")
+			return nil
+		}
+		return cl.agentConfigJSONToValues(cfg)
+	}
+
+	return nil
+}
+
+func (cl *ConfigLoader) agentConfigJSONToValues(cfg *AgentConfigJSON) *agentConfigValues {
+	if cfg == nil {
+		return nil
+	}
+
+	reportInterval := defaultReportInterval
+	if cfg.ReportInterval != emptyString {
+		if dur, err := strconv.ParseUint(cfg.ReportInterval, 10, 32); err == nil {
+			reportInterval = uint(dur)
+		}
+	}
+
+	pollInterval := defaultPollInterval
+	if cfg.PollInterval != emptyString {
+		if dur, err := strconv.ParseUint(cfg.PollInterval, 10, 32); err == nil {
+			pollInterval = uint(dur)
+		}
+	}
+
+	return &agentConfigValues{
+		SocketConfig: SocketConfig{
+			Host: defaultHost,
+			Port: defaultPort,
+		},
+		PollInterval:   pollInterval,
+		ReportInterval: reportInterval,
+		PublicKeyPath:  cfg.CryptoKey,
+	}
+}
+
+func (cl *ConfigLoader) parseAgentFlags() *agentConfigValues {
 	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
 
-	configFile := ""
+	configFile := emptyString
 	socket := SocketConfig{
 		Host: defaultHost,
 		Port: defaultPort,
 	}
-	hashKey := HashConfig{
-		Key: emptyString,
-	}
-
-	// Default values from config file (lowest priority)
-	var loadedConfig *AgentConfigJSON
-
-	// Check env var for config file first
-	envConfigFile := os.Getenv("CONFIG")
-	if envConfigFile != "" {
-		cfg, err := LoadAgentConfigFromFile(envConfigFile)
-		if err != nil {
-			log.Warn().Str("config_file", envConfigFile).Err(err).Msg("Failed to load config from file")
-		} else {
-			loadedConfig = cfg
-		}
-	}
-
-	// Then check -c/-config flag
-	flagSet.StringVar(&configFile, "c", "", "Path to config file")
-	flagSet.StringVar(&configFile, "config", "", "Path to config file")
-	flagSet.Var(&socket, "a", "-a=<host>:<port>")
-	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
+	hashKey := HashConfig{Key: emptyString}
 
 	pollInterval := flagSet.Uint("p", defaultPollInterval, "polling interval in seconds")
 	reportInterval := flagSet.Uint("r", defaultReportInterval, "report interval in seconds")
-	rateLimit := flagSet.Uint("l", 1, "rate limit for agent")
-	publicKeyPath := flagSet.String("crypto-key", "", "Path to the public key for encryption")
+	rateLimit := flagSet.Uint("l", defaultRateLimit, "rate limit for agent")
+	publicKeyPath := flagSet.String("crypto-key", emptyString, "Path to the public key for encryption")
 
-	// Parse flags (medium priority)
-	if err := flagSet.Parse(args); err != nil {
+	flagSet.StringVar(&configFile, "c", emptyString, "Path to config file")
+	flagSet.StringVar(&configFile, "config", emptyString, "Path to config file")
+	flagSet.Var(&socket, "a", "-a=<host>:<port>")
+	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
+
+	if err := flagSet.Parse(cl.args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
 	}
 
-	// Now load config file from flag if provided
-	if configFile != "" && loadedConfig == nil {
-		cfg, err := LoadAgentConfigFromFile(configFile)
-		if err != nil {
-			log.Warn().Str("config_file", configFile).Err(err).Msg("Failed to load config from file")
-		} else {
-			loadedConfig = cfg
-		}
+	return &agentConfigValues{
+		SocketConfig:   socket,
+		HashConfig:     hashKey,
+		PollInterval:   *pollInterval,
+		ReportInterval: *reportInterval,
+		RateLimit:      *rateLimit,
+		PublicKeyPath:  *publicKeyPath,
 	}
+}
 
-	// Apply defaults from config file first
-	if loadedConfig != nil {
-		if socket.Host == defaultHost && socket.Port == defaultPort {
-			if loadedConfig.Address != "" {
-				socket.Set(loadedConfig.Address)
-			}
-		}
-		if *reportInterval == defaultReportInterval {
-			if loadedConfig.ReportInterval != "" {
-				if dur, err := time.ParseDuration(loadedConfig.ReportInterval); err == nil {
-					*reportInterval = uint(dur.Seconds())
-				}
-			}
-		}
-		if *pollInterval == defaultPollInterval {
-			if loadedConfig.PollInterval != "" {
-				if dur, err := time.ParseDuration(loadedConfig.PollInterval); err == nil {
-					*pollInterval = uint(dur.Seconds())
-				}
-			}
-		}
-		if *publicKeyPath == "" {
-			if loadedConfig.CryptoKey != "" {
-				*publicKeyPath = loadedConfig.CryptoKey
-			}
-		}
-	}
+func (cl *ConfigLoader) getAgentEnvConfig() *agentConfigValues {
+	defConfig := cl.getDefaultAgentConfig()
 
-	// Now apply environment variables (highest priority)
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
-		socket.Set(val)
+		defConfig.SocketConfig.Set(val)
 		log.Info().Str("ADDRESS", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("POLL_INTERVAL"); ok {
 		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
-			*pollInterval = uint(parsed)
+			defConfig.PollInterval = uint(parsed)
 		}
 	}
 
 	if val, ok := os.LookupEnv("REPORT_INTERVAL"); ok {
 		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
-			*reportInterval = uint(parsed)
+			defConfig.ReportInterval = uint(parsed)
 		}
 	}
+
 	if val, ok := os.LookupEnv("KEY"); ok {
-		hashKey.Set(val)
+		defConfig.HashConfig.Set(val)
 		log.Info().Str("KEY", val).Send()
 	}
 
 	if val, ok := os.LookupEnv("RATE_LIMIT"); ok {
 		if parsed, err := strconv.ParseUint(val, 10, 32); err == nil {
-			*rateLimit = uint(parsed)
+			defConfig.RateLimit = uint(parsed)
 		}
 	}
 
 	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
-		*publicKeyPath = val
+		defConfig.PublicKeyPath = val
 	}
 
-	return AgentConfig{
-		SocketConfig:   socket,
-		PollInterval:   time.Duration(*pollInterval) * time.Second,
-		ReportInterval: time.Duration(*reportInterval) * time.Second,
-		HashConfig:     hashKey,
-		RateLimit:      *rateLimit,
-		PublicKeyPath:  *publicKeyPath,
+	return defConfig
+}
+
+func (cl *ConfigLoader) mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv *agentConfigValues) *agentConfigValues {
+	merged := *defaults
+
+	// Apply from file if not default
+	if fromFile != nil {
+		if merged.SocketConfig.Host == defaultHost && merged.SocketConfig.Port == defaultPort {
+			merged.SocketConfig = fromFile.SocketConfig
+		}
+		if merged.ReportInterval == defaultReportInterval {
+			merged.ReportInterval = fromFile.ReportInterval
+		}
+		if merged.PollInterval == defaultPollInterval {
+			merged.PollInterval = fromFile.PollInterval
+		}
+		if merged.PublicKeyPath == emptyString {
+			merged.PublicKeyPath = fromFile.PublicKeyPath
+		}
 	}
+
+	// Apply from flags if not default
+	if fromFlags != nil {
+		if fromFlags.SocketConfig.Host != defaultHost || fromFlags.SocketConfig.Port != defaultPort {
+			merged.SocketConfig = fromFlags.SocketConfig
+		}
+		merged.HashConfig = fromFlags.HashConfig
+		if fromFlags.PollInterval != defaultPollInterval {
+			merged.PollInterval = fromFlags.PollInterval
+		}
+		if fromFlags.ReportInterval != defaultReportInterval {
+			merged.ReportInterval = fromFlags.ReportInterval
+		}
+		if fromFlags.RateLimit != defaultRateLimit {
+			merged.RateLimit = fromFlags.RateLimit
+		}
+
+		merged.PublicKeyPath = fromFlags.PublicKeyPath
+	}
+
+	// Apply from env (highest priority)
+	if fromEnv != nil {
+		if fromEnv.SocketConfig.Host != defaultHost || fromEnv.SocketConfig.Port != defaultPort {
+			merged.SocketConfig = fromEnv.SocketConfig
+		}
+		if fromEnv.HashConfig.Key != emptyString {
+			merged.HashConfig = fromEnv.HashConfig
+		}
+
+		if fromEnv.PollInterval != defaultPollInterval {
+			merged.PollInterval = fromEnv.PollInterval
+		}
+		if fromEnv.ReportInterval != defaultReportInterval {
+			merged.ReportInterval = fromEnv.ReportInterval
+		}
+		if fromEnv.RateLimit != defaultRateLimit {
+			merged.RateLimit = fromEnv.RateLimit
+		}
+		merged.PublicKeyPath = fromEnv.PublicKeyPath
+	}
+
+	return &merged
 }

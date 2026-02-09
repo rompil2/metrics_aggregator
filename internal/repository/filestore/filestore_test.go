@@ -27,7 +27,7 @@ func TestNewFileStore(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   time.Second,
 			FileStoragePath: "test.json",
-			Restore:         true,
+			Restore:         func(b bool) *bool { return &b }(true), // true
 		}
 
 		// Create test file for restore
@@ -60,7 +60,7 @@ func TestNewFileStore(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   time.Second,
 			FileStoragePath: "nonexistent.json",
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false),
 		}
 
 		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
@@ -82,7 +82,7 @@ func TestStore_SetMetrics(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   0, // synchronous mode
 			FileStoragePath: "test.json",
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false),
 		}
 
 		mockRepo.EXPECT().SetMetrics("test", gomock.Any()).Return(nil)
@@ -175,12 +175,12 @@ func TestStore_Save(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   0, // synchronous mode
 			FileStoragePath: testFile,
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false), // false
 		}
 
 		testMetrics := []model.Metrics{
-			model.Metrics{ID: "test1", MType: "gauge", Value: &v},
-			model.Metrics{ID: "test2", MType: "counter", Delta: &d},
+			{ID: "test1", MType: "gauge", Value: &v},
+			{ID: "test2", MType: "counter", Delta: &d},
 		}
 
 		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil)
@@ -210,10 +210,10 @@ func TestStore_Save(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   10 * time.Millisecond,
 			FileStoragePath: testFile,
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false), // false
 		}
 
-		testMetrics := []model.Metrics{model.Metrics{ID: "test", MType: "gauge", Value: &v}}
+		testMetrics := []model.Metrics{{ID: "test", MType: "gauge", Value: &v}}
 		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil).AnyTimes()
 
 		store, err := NewFileStore(mockRepo, cfg)
@@ -237,10 +237,10 @@ func TestStore_Save(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   0,
 			FileStoragePath: testFile,
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false), // false
 		}
 		v := float64(1.0)
-		testMetrics := []model.Metrics{model.Metrics{ID: "test", MType: "gauge", Value: &v}}
+		testMetrics := []model.Metrics{{ID: "test", MType: "gauge", Value: &v}}
 		mockRepo.EXPECT().GetAllMetrics().Return(testMetrics, nil).AnyTimes()
 
 		store, err := NewFileStore(mockRepo, cfg)
@@ -265,7 +265,7 @@ func TestStore_Close(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   time.Second,
 			FileStoragePath: "close_test.json",
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false), //false
 		}
 
 		mockRepo.EXPECT().GetAllMetrics().Return([]model.Metrics{}, nil).AnyTimes()
@@ -299,7 +299,7 @@ func TestStore_EdgeCases(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   time.Second,
 			FileStoragePath: "test.json",
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false),
 		}
 
 		expectedErr := errors.New("repo error")
@@ -321,7 +321,7 @@ func TestStore_EdgeCases(t *testing.T) {
 		cfg := config.StoreConfig{
 			StoreInterval:   0,
 			FileStoragePath: "test.json",
-			Restore:         false,
+			Restore:         func(b bool) *bool { return &b }(false), //false
 		}
 
 		expectedErr := errors.New("all metrics error")
