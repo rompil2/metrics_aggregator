@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rompil2/metrics_aggregator/internal/audit"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 	"github.com/rompil2/metrics_aggregator/internal/service"
@@ -35,8 +36,9 @@ type Service interface {
 // middleware chain, and dependencies such as the service layer and HTML templates.
 type HandlerMux struct {
 	chi.Router
-	Service Service
-	tmpl    *template.Template
+	Service       Service
+	CryptoService *crypto.CryptoService
+	tmpl          *template.Template
 }
 
 // NewHandlerMux creates a new HTTP handler with a complete middleware stack and route registration.
@@ -45,20 +47,20 @@ type HandlerMux struct {
 // The provided service is used for business logic, and the template is used for the root HTML page.
 func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string, privateKey *rsa.PrivateKey) *HandlerMux {
 
+	cryptoService := crypto.NewCryptoService(privateKey)
 	h := &HandlerMux{
-		Service: service,
-		tmpl:    tmpl,
+		Service:       service,
+		CryptoService: cryptoService,
+		tmpl:          tmpl,
 	}
 	h.Router = chi.NewRouter()
 	h.Use(middleware.RequestID)
 	h.Use(middleware.RealIP)
 	// h.Use(middleware.Compress(1, "text/html", "application/json"))
 	h.Use(MiddlewareRequestUnzip)
-	if key != "" {
-		h.Use(MiddlewareCheckHash(key))
-	}
+
 	h.Use(NaiveLoggerMiddleware)
-	h.Use(MiddlewareCryptoDecrypt(privateKey))
+	// h.Use(MiddlewareCryptoDecrypt(privateKey))
 	h.Use(MiddlewareResponseZip)
 	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
 	if key != "" {
@@ -156,6 +158,15 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 	log := logger.FromContext(r.Context())
 	log.Debug().Msg("Process updating a metrics")
 
+	if h.CryptoService != nil {
+		decryptedBody, err := h.CryptoService.DecryptRequestBody(r.Body)
+		if err != nil {
+			http.Error(w, "Decryption failed", http.StatusBadRequest)
+			return
+		}
+		r.Body = decryptedBody
+	}
+
 	var metricsModel model.Metrics
 	decoder := json.NewDecoder(r.Body)
 	defer r.Body.Close()
@@ -190,6 +201,15 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 func (h *HandlerMux) UpdatesWithJSON(w http.ResponseWriter, r *http.Request) {
 	log := logger.FromContext(r.Context())
 	log.Debug().Msg("Process updating a metrics")
+
+	if h.CryptoService != nil {
+		decryptedBody, err := h.CryptoService.DecryptRequestBody(r.Body)
+		if err != nil {
+			http.Error(w, "Decryption failed", http.StatusBadRequest)
+			return
+		}
+		r.Body = decryptedBody
+	}
 
 	var metricsModels []model.Metrics
 	decoder := json.NewDecoder(r.Body)
