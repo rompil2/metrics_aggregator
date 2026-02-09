@@ -176,10 +176,12 @@ type ConfigLoader struct {
 	args []string
 }
 
+// NewConfigLoader creates a new ConfigLoader instance with the given command-line arguments.
 func NewConfigLoader(args []string) *ConfigLoader {
 	return &ConfigLoader{args: args}
 }
 
+// LoadServerConfig loads and merges server configuration from defaults, file, flags, and environment variables.
 func (cl *ConfigLoader) LoadServerConfig() ServerConfig {
 	defaults := cl.getDefaultServerConfig()
 	fromFile := cl.loadServerConfigFromFile()
@@ -202,6 +204,7 @@ func (cl *ConfigLoader) LoadServerConfig() ServerConfig {
 	}
 }
 
+// getDefaultServerConfig returns the default server configuration values.
 func (cl *ConfigLoader) getDefaultServerConfig() *serverConfigValues {
 	return &serverConfigValues{
 		SocketConfig: SocketConfig{
@@ -230,6 +233,7 @@ type serverConfigValues struct {
 	PrivateKeyPath string
 }
 
+// loadServerConfigFromFile loads server configuration from a JSON file specified by environment variable or flag.
 func (cl *ConfigLoader) loadServerConfigFromFile() *serverConfigValues {
 	envConfigFile := os.Getenv("CONFIG")
 	if envConfigFile != emptyString {
@@ -259,6 +263,7 @@ func (cl *ConfigLoader) loadServerConfigFromFile() *serverConfigValues {
 	return nil
 }
 
+// serverConfigJSONToValues converts a ServerConfigJSON to serverConfigValues.
 func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverConfigValues {
 	if cfg == nil {
 		return nil
@@ -290,6 +295,7 @@ func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverC
 	}
 }
 
+// parseServerFlags parses command-line flags for server configuration.
 func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
 
@@ -305,9 +311,7 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	storeInterval := flagSet.Uint("i", defaultStoreInterval, "storing interval in seconds")
 	fileStoragePath := flagSet.String("f", defaultFileStoragePath, "path to a file to store data")
 	restore := flagSet.Bool("r", defaultRestore, "should restore data")
-	if !*restore {
-		restore = nil
-	}
+
 	database := flagSet.String("d", emptyString, "A DB connection string")
 	privateKeyPath := flagSet.String("crypto-key", emptyString, "Path to the private key for decryption")
 
@@ -321,7 +325,9 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	if err := flagSet.Parse(cl.args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
 	}
-
+	if !*restore {
+		restore = nil
+	}
 	return &serverConfigValues{
 		SocketConfig: socket,
 		HashConfig:   hashKey,
@@ -336,6 +342,7 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	}
 }
 
+// getServerEnvConfig loads server configuration from environment variables.
 func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
 	defConfig := cl.getDefaultServerConfig()
 
@@ -390,6 +397,7 @@ func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
 
 }
 
+// mergeServerConfigs merges server configuration from defaults, file, flags, and environment variables with priority.
 func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEnv *serverConfigValues) *serverConfigValues {
 	merged := *defaults
 
@@ -417,11 +425,7 @@ func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEn
 
 	// Apply from flags if not default
 	if fromFlags != nil {
-		// merged.SocketConfig = fromFlags.SocketConfig
-		// merged.HashConfig = fromFlags.HashConfig
-		// merged.StoreConfig = fromFlags.StoreConfig
-		// merged.AuditConfig = fromFlags.AuditConfig
-		// merged.PrivateKeyPath = fromFlags.PrivateKeyPath
+
 		if fromFlags.SocketConfig.Host != defaultHost || fromFlags.SocketConfig.Port != defaultPort {
 			merged.SocketConfig = fromFlags.SocketConfig
 		}
@@ -495,6 +499,7 @@ func LoadAgentConfig(args []string) AgentConfig {
 	return loader.LoadAgentConfig()
 }
 
+// LoadAgentConfig loads and merges agent configuration from defaults, file, flags, and environment variables.
 func (cl *ConfigLoader) LoadAgentConfig() AgentConfig {
 	defaults := cl.getDefaultAgentConfig()
 	fromFile := cl.loadAgentConfigFromFile()
@@ -513,6 +518,7 @@ func (cl *ConfigLoader) LoadAgentConfig() AgentConfig {
 	}
 }
 
+// getDefaultAgentConfig returns the default agent configuration values.
 func (cl *ConfigLoader) getDefaultAgentConfig() *agentConfigValues {
 	return &agentConfigValues{
 		SocketConfig: SocketConfig{
@@ -536,6 +542,7 @@ type agentConfigValues struct {
 	PublicKeyPath  string
 }
 
+// loadAgentConfigFromFile loads agent configuration from a JSON file specified by environment variable or flag.
 func (cl *ConfigLoader) loadAgentConfigFromFile() *agentConfigValues {
 	envConfigFile := os.Getenv("CONFIG")
 	if envConfigFile != emptyString {
@@ -565,6 +572,7 @@ func (cl *ConfigLoader) loadAgentConfigFromFile() *agentConfigValues {
 	return nil
 }
 
+// agentConfigJSONToValues converts an AgentConfigJSON to agentConfigValues.
 func (cl *ConfigLoader) agentConfigJSONToValues(cfg *AgentConfigJSON) *agentConfigValues {
 	if cfg == nil {
 		return nil
@@ -595,6 +603,7 @@ func (cl *ConfigLoader) agentConfigJSONToValues(cfg *AgentConfigJSON) *agentConf
 	}
 }
 
+// parseAgentFlags parses command-line flags for agent configuration.
 func (cl *ConfigLoader) parseAgentFlags() *agentConfigValues {
 	flagSet := flag.NewFlagSet("agent", flag.ContinueOnError)
 
@@ -629,6 +638,7 @@ func (cl *ConfigLoader) parseAgentFlags() *agentConfigValues {
 	}
 }
 
+// getAgentEnvConfig loads agent configuration from environment variables.
 func (cl *ConfigLoader) getAgentEnvConfig() *agentConfigValues {
 	defConfig := cl.getDefaultAgentConfig()
 
@@ -667,6 +677,7 @@ func (cl *ConfigLoader) getAgentEnvConfig() *agentConfigValues {
 	return defConfig
 }
 
+// mergeAgentConfigs merges agent configuration from defaults, file, flags, and environment variables with priority.
 func (cl *ConfigLoader) mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv *agentConfigValues) *agentConfigValues {
 	merged := *defaults
 
