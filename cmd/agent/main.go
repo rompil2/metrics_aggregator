@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/rompil2/metrics_aggregator/internal/agent"
 	"github.com/rompil2/metrics_aggregator/internal/config"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 )
 
 const (
@@ -17,15 +19,35 @@ const (
 	waitBeforeQuit = 1 // in seconds
 )
 
-func main() {
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
 
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+}
+
+func main() {
+	printBuildInfo()
 	cfg := config.LoadAgentConfig(os.Args[1:])
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	publicKey, err := crypto.LoadPublicKey(cfg.PublicKeyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Fatalf("Public key file not found: %v", err)
+		} else {
+			log.Fatalf("Error loading public key: %v", err)
+		}
+	}
 
 	// Настройка агента
 	collector := agent.NewCollector(cfg.PollInterval)
-	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.Host, cfg.Port, true, cfg.HashConfig.String(), cfg.RateLimit)
+	client := agent.NewHTTPClient(cfg.ReportInterval, cfg.Host, cfg.Port, true, cfg.HashConfig.String(), cfg.RateLimit, publicKey)
 	agent := agent.New(collector, client)
 
 	// Запуск агента
@@ -37,7 +59,7 @@ func main() {
 
 	// Ожидание сигнала завершения
 	stop := make(chan os.Signal, sigterChSize)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	<-stop
 
 	log.Println("Shutting down...")

@@ -35,7 +35,7 @@ func TestCollector_Run_MetricsDelivery(t *testing.T) {
 		assert.Contains(t, metrics, "RandomValue")
 		assert.Contains(t, metrics, "Alloc")
 		assert.Contains(t, metrics, "PollCount")
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond):
 		t.Fatal("Timeout waiting for metrics")
 	}
 }

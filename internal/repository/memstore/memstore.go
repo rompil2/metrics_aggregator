@@ -1,3 +1,5 @@
+// Package memstore implements an in-memory metrics storage using sync.Map.
+// path: internal/repository/memstore
 package memstore
 
 import (
@@ -9,18 +11,24 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
+// MemStorage is a concurrent-safe in-memory metrics store based on sync.Map.
+// It supports both Counter and Gauge metric types with atomic updates for counters.
 type MemStorage struct {
 	storage sync.Map
 }
 
-// NewMemStore создает и возвращает новый MemStorage
+// NewMemStore creates and returns a new instance of MemStorage.
+// The store is safe for concurrent use from multiple goroutines.
 func NewMemStore() *MemStorage {
 	return &MemStorage{
 		storage: sync.Map{},
 	}
 }
 
-// SetMetrics устанавливает или обновляет метрику в хранилище
+// SetMetrics stores or updates a metric by ID in the in-memory store.
+// For Counter metrics, it atomically adds the provided Delta value to the existing counter.
+// For Gauge metrics, it replaces the current value.
+// Returns an error if the metric type is unknown or required fields are missing.
 func (mem *MemStorage) SetMetrics(id string, metric model.Metrics) error {
 	switch metric.MType {
 	case model.Counter:
@@ -45,7 +53,8 @@ func (mem *MemStorage) SetMetrics(id string, metric model.Metrics) error {
 	return nil
 }
 
-// GetMetrics возвращает метрику по ID
+// GetMetrics retrieves a metric by its ID from the store.
+// Returns an error if the metric does not exist or has an invalid type.
 func (mem *MemStorage) GetMetrics(ID string) (model.Metrics, error) {
 	val, ok := mem.storage.Load(ID)
 	if !ok {
@@ -60,7 +69,9 @@ func (mem *MemStorage) GetMetrics(ID string) (model.Metrics, error) {
 	return metric, nil
 }
 
-// GetAllMetrics возвращает все метрики из хранилища
+// GetAllMetrics returns a snapshot of all metrics currently stored in memory.
+// The returned slice is a copy and safe to modify; however, the operation may be expensive
+// under high load as it iterates over the entire map.
 func (mem *MemStorage) GetAllMetrics() ([]model.Metrics, error) {
 	var result []model.Metrics
 
@@ -74,7 +85,9 @@ func (mem *MemStorage) GetAllMetrics() ([]model.Metrics, error) {
 	return result, nil
 }
 
-// SetAllMetrics устанавливает несколько метрик
+// SetAllMetrics stores multiple metrics in a single batch operation.
+// It applies each metric sequentially using SetMetrics and stops on the first error.
+// This method is not atomic—partial updates may occur if an error happens midway.
 func (mem *MemStorage) SetAllMetrics(metrics []model.Metrics) error {
 	for _, metric := range metrics {
 		if err := mem.SetMetrics(metric.ID, metric); err != nil {
@@ -84,7 +97,9 @@ func (mem *MemStorage) SetAllMetrics(metrics []model.Metrics) error {
 	return nil
 }
 
-// Ping проверяет доступность хранилища
+// Ping checks the availability of the storage backend.
+// Currently returns an error because health-check logic is not implemented for in-memory storage.
+// For compatibility with the Storage interface.
 func (mem *MemStorage) Ping() error {
 	// Для in-memory хранилища всегда доступно
 	return errors.New("not implemented yet")
