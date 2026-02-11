@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -278,6 +279,42 @@ func MiddlewareCryptoDecrypt(privateKey *rsa.PrivateKey) func(http.Handler) http
 			r.ContentLength = int64(len(decryptedBody))
 
 			// Передаём управление дальше
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func MiddlewareCheckIP(trustedSubnet string) func(http.Handler) http.Handler {
+	if trustedSubnet == "" {
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	_, ipNet, err := net.ParseCIDR(trustedSubnet)
+	if err != nil {
+		panic("invalid CIDR in TrustedSubnet: " + trustedSubnet)
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			realIP := r.Header.Get("X-Real-IP")
+			if realIP == "" {
+				http.Error(w, "X-Real-IP header is required", http.StatusForbidden)
+				return
+			}
+
+			ip := net.ParseIP(realIP)
+			if ip == nil {
+				http.Error(w, "Invalid IP in X-Real-IP", http.StatusForbidden)
+				return
+			}
+
+			if !ipNet.Contains(ip) {
+				http.Error(w, "IP is not in trusted subnet", http.StatusForbidden)
+				return
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}

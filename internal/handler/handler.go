@@ -45,7 +45,7 @@ type HandlerMux struct {
 // It configures request ID, real IP extraction, request decompression, response compression,
 // optional request/response hashing, structured logging, recovery, and audit logging.
 // The provided service is used for business logic, and the template is used for the root HTML page.
-func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string, privateKey *rsa.PrivateKey) *HandlerMux {
+func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string, privateKey *rsa.PrivateKey, trustedSubnet string) *HandlerMux {
 
 	cryptoService := crypto.NewCryptoService(privateKey)
 	h := &HandlerMux{
@@ -55,7 +55,8 @@ func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath,
 	}
 	h.Router = chi.NewRouter()
 	h.Use(middleware.RequestID)
-	h.Use(middleware.RealIP)
+	// h.Use(middleware.RealIP)
+	h.Use(MiddlewareCheckIP(trustedSubnet))
 	// h.Use(middleware.Compress(1, "text/html", "application/json"))
 	h.Use(MiddlewareRequestUnzip)
 

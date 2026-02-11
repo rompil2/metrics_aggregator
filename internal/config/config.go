@@ -110,6 +110,7 @@ type ServerConfig struct {
 	SocketConfig
 	StoreConfig
 	PrivateKeyPath string
+	TrustedSubnet  string
 }
 
 // ServerConfigJSON represents the JSON format for server config.
@@ -120,6 +121,7 @@ type ServerConfigJSON struct {
 	StoreFile     string `json:"store_file"`
 	DatabaseDSN   string `json:"database_dsn"`
 	CryptoKey     string `json:"crypto_key"`
+	TrustedSubnet string `json:"trusted_subnet"`
 }
 
 // AgentConfig contains all settings needed for the metrics collection agent,
@@ -231,6 +233,7 @@ type serverConfigValues struct {
 	StoreConfig
 	AuditConfig
 	PrivateKeyPath string
+	TrustedSubnet  string
 }
 
 // loadServerConfigFromFile loads server configuration from a JSON file specified by environment variable or flag.
@@ -292,6 +295,7 @@ func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverC
 			AuditURL:  Audit{auditSink: emptyString},
 		},
 		PrivateKeyPath: cfg.CryptoKey,
+		TrustedSubnet:  cfg.TrustedSubnet,
 	}
 }
 
@@ -314,6 +318,7 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 
 	database := flagSet.String("d", emptyString, "A DB connection string")
 	privateKeyPath := flagSet.String("crypto-key", emptyString, "Path to the private key for decryption")
+	trustedSubnet := flagSet.String("t", "", "trusted subnet in CIDR format")
 
 	flagSet.StringVar(&configFile, "c", emptyString, "Path to config file")
 	flagSet.StringVar(&configFile, "config", emptyString, "Path to config file")
@@ -339,6 +344,7 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 		},
 		AuditConfig:    AuditConfig{AuditFile: auditFile, AuditURL: auditURL},
 		PrivateKeyPath: *privateKeyPath,
+		TrustedSubnet:  *trustedSubnet,
 	}
 }
 
@@ -391,6 +397,10 @@ func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
 
 	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
 		defConfig.PrivateKeyPath = val
+	}
+	if val, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
+		defConfig.TrustedSubnet = val
+		log.Info().Str("TRUSTED_SUBNET", val).Send()
 	}
 
 	return defConfig

@@ -89,6 +89,7 @@ func main() {
 		cfg.AuditFile.String(),
 		cfg.AuditURL.String(),
 		privateKey,
+		cfg.TrustedSubnet,
 	)
 	server := &http.Server{
 		Addr:    cfg.SocketConfig.String(),
