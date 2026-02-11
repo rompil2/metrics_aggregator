@@ -282,3 +282,83 @@ func TestSupportsGzip(t *testing.T) {
 		})
 	}
 }
+
+func TestMiddlewareCheckIP(t *testing.T) {
+	tests := []struct {
+		name           string
+		trustedSubnet  string
+		headerIP       string
+		expectedStatus int
+		expectPanic    bool
+	}{
+		{
+			name:           "NoSubnet_AllowsEverything",
+			trustedSubnet:  "",
+			headerIP:       "",
+			expectedStatus: http.StatusOK,
+			expectPanic:    false,
+		},
+		{
+			name:           "MissingHeader_ReturnsForbidden",
+			trustedSubnet:  "192.168.1.0/24",
+			headerIP:       "",
+			expectedStatus: http.StatusForbidden,
+			expectPanic:    false,
+		},
+		{
+			name:           "InvalidIP_ReturnsForbidden",
+			trustedSubnet:  "192.168.1.0/24",
+			headerIP:       "not-an-ip",
+			expectedStatus: http.StatusForbidden,
+			expectPanic:    false,
+		},
+		{
+			name:           "NotInSubnet_ReturnsForbidden",
+			trustedSubnet:  "192.168.1.0/24",
+			headerIP:       "10.0.0.1",
+			expectedStatus: http.StatusForbidden,
+			expectPanic:    false,
+		},
+		{
+			name:           "ValidIP_AllowsRequest",
+			trustedSubnet:  "192.168.1.0/24",
+			headerIP:       "192.168.1.100",
+			expectedStatus: http.StatusOK,
+			expectPanic:    false,
+		},
+		{
+			name:           "PanicsOnInvalidCIDR",
+			trustedSubnet:  "invalid-cidr",
+			headerIP:       "",
+			expectedStatus: 0,
+			expectPanic:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.expectPanic {
+				assert.Panics(t, func() {
+					MiddlewareCheckIP(tt.trustedSubnet)
+				})
+				return
+			}
+
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+			middleware := MiddlewareCheckIP(tt.trustedSubnet)
+			handler := middleware(next)
+
+			req := httptest.NewRequest("GET", "/", nil)
+			if tt.headerIP != "" {
+				req.Header.Set("X-Real-IP", tt.headerIP)
+			}
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.expectedStatus, rec.Code)
+		})
+	}
+}
