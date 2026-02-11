@@ -346,7 +346,16 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 		if err != nil {
 			return fmt.Errorf("creating request: %w", err)
 		}
-
+		if ips,err := net.InterfaceAddrs(); err != nil {
+			return fmt.Errorf("getting interface addresses: %w", err)
+		} else { 
+			req.Header.Set("X-Real-IP", ips[0].String())
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+			req.Header.Set("X-Real-IP", ips[0].String())
+		}
+		req.Header.Set("X-Real-IP", net.InterfaceAddrs()[0].String())
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Set("Accept-Encoding", "gzip")
