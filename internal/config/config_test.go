@@ -405,7 +405,7 @@ func TestConfigLoader_getServerEnvConfig(t *testing.T) {
 
 	config := loader.getServerEnvConfig()
 
-	expected := &serverConfigValues{
+	expected := &ServerConfig{
 		SocketConfig: SocketConfig{
 			Host: "0.0.0.0",
 			Port: 8123,
@@ -478,7 +478,7 @@ func TestConfigLoader_parseServerFlags(t *testing.T) {
 	loader := NewConfigLoader(flags)
 	config := loader.parseServerFlags()
 
-	expected := &serverConfigValues{
+	expected := &ServerConfig{
 		SocketConfig: SocketConfig{
 			Host: "127.0.0.1",
 			Port: 9092,
@@ -541,7 +541,7 @@ func TestConfigLoader_serverConfigJSONToValues(t *testing.T) {
 	loader := NewConfigLoader([]string{})
 	config := loader.serverConfigJSONToValues(jsonConfig)
 
-	expected := &serverConfigValues{
+	expected := &ServerConfig{
 		SocketConfig: SocketConfig{
 			Host: defaultHost,
 			Port: defaultPort,

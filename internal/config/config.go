@@ -111,6 +111,7 @@ type ServerConfig struct {
 	StoreConfig
 	PrivateKeyPath string
 	TrustedSubnet  string
+	GRPCAddr       string
 }
 
 // ServerConfigJSON represents the JSON format for server config.
@@ -122,6 +123,16 @@ type ServerConfigJSON struct {
 	DatabaseDSN   string `json:"database_dsn"`
 	CryptoKey     string `json:"crypto_key"`
 	TrustedSubnet string `json:"trusted_subnet"`
+	GRPCAddr      string `json:"grpc_address"`
+}
+type agentConfigValues struct {
+	SocketConfig
+	HashConfig
+	PollInterval   uint
+	ReportInterval uint
+	RateLimit      uint
+	PublicKeyPath  string
+	GRPCAddr       string
 }
 
 // AgentConfig contains all settings needed for the metrics collection agent,
@@ -133,6 +144,7 @@ type AgentConfig struct {
 	ReportInterval time.Duration
 	RateLimit      uint
 	PublicKeyPath  string
+	GRPCAddr       string
 }
 
 // AgentConfigJSON represents the JSON format for agent config.
@@ -141,6 +153,7 @@ type AgentConfigJSON struct {
 	ReportInterval string `json:"report_interval"`
 	PollInterval   string `json:"poll_interval"`
 	CryptoKey      string `json:"crypto_key"`
+	GRPCAddr       string `json:"grpc_address"`
 }
 
 // LoadServerConfigFromFile loads server config from a JSON file.
@@ -203,12 +216,13 @@ func (cl *ConfigLoader) LoadServerConfig() ServerConfig {
 		HashConfig:     merged.HashConfig,
 		AuditConfig:    merged.AuditConfig,
 		PrivateKeyPath: merged.PrivateKeyPath,
+		GRPCAddr:       merged.GRPCAddr,
 	}
 }
 
 // getDefaultServerConfig returns the default server configuration values.
-func (cl *ConfigLoader) getDefaultServerConfig() *serverConfigValues {
-	return &serverConfigValues{
+func (cl *ConfigLoader) getDefaultServerConfig() *ServerConfig {
+	return &ServerConfig{
 		SocketConfig: SocketConfig{
 			Host: defaultHost,
 			Port: defaultPort,
@@ -224,20 +238,12 @@ func (cl *ConfigLoader) getDefaultServerConfig() *serverConfigValues {
 			AuditURL:  Audit{},
 		},
 		PrivateKeyPath: emptyString,
+		GRPCAddr:       emptyString,
 	}
 }
 
-type serverConfigValues struct {
-	SocketConfig
-	HashConfig
-	StoreConfig
-	AuditConfig
-	PrivateKeyPath string
-	TrustedSubnet  string
-}
-
 // loadServerConfigFromFile loads server configuration from a JSON file specified by environment variable or flag.
-func (cl *ConfigLoader) loadServerConfigFromFile() *serverConfigValues {
+func (cl *ConfigLoader) loadServerConfigFromFile() *ServerConfig {
 	envConfigFile := os.Getenv("CONFIG")
 	if envConfigFile != emptyString {
 		cfg, err := LoadServerConfigFromFile(envConfigFile)
@@ -266,8 +272,8 @@ func (cl *ConfigLoader) loadServerConfigFromFile() *serverConfigValues {
 	return nil
 }
 
-// serverConfigJSONToValues converts a ServerConfigJSON to serverConfigValues.
-func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverConfigValues {
+// serverConfigJSONToValues converts a ServerConfigJSON to ServerConfig.
+func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *ServerConfig {
 	if cfg == nil {
 		return nil
 	}
@@ -279,7 +285,7 @@ func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverC
 		}
 	}
 
-	return &serverConfigValues{
+	return &ServerConfig{
 		SocketConfig: SocketConfig{
 			Host: defaultHost,
 			Port: defaultPort,
@@ -296,11 +302,12 @@ func (cl *ConfigLoader) serverConfigJSONToValues(cfg *ServerConfigJSON) *serverC
 		},
 		PrivateKeyPath: cfg.CryptoKey,
 		TrustedSubnet:  cfg.TrustedSubnet,
+		GRPCAddr:       cfg.GRPCAddr,
 	}
 }
 
 // parseServerFlags parses command-line flags for server configuration.
-func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
+func (cl *ConfigLoader) parseServerFlags() *ServerConfig {
 	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
 
 	configFile := emptyString
@@ -326,6 +333,7 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
 	flagSet.Var(&auditFile, "audit-file", "--audit-file=<path to an audit log file>")
 	flagSet.Var(&auditURL, "audit-url", "--audit-url=<URL to an audit log service>")
+	grpcAddr := flagSet.String("grpc-addr", emptyString, "gRPC server address")
 
 	if err := flagSet.Parse(cl.args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
@@ -333,7 +341,7 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 	if !*restore {
 		restore = nil
 	}
-	return &serverConfigValues{
+	return &ServerConfig{
 		SocketConfig: socket,
 		HashConfig:   hashKey,
 		StoreConfig: StoreConfig{
@@ -345,11 +353,12 @@ func (cl *ConfigLoader) parseServerFlags() *serverConfigValues {
 		AuditConfig:    AuditConfig{AuditFile: auditFile, AuditURL: auditURL},
 		PrivateKeyPath: *privateKeyPath,
 		TrustedSubnet:  *trustedSubnet,
+		GRPCAddr:       *grpcAddr,
 	}
 }
 
 // getServerEnvConfig loads server configuration from environment variables.
-func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
+func (cl *ConfigLoader) getServerEnvConfig() *ServerConfig {
 	defConfig := cl.getDefaultServerConfig()
 
 	if val, ok := os.LookupEnv("ADDRESS"); ok {
@@ -398,9 +407,15 @@ func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
 	if val, ok := os.LookupEnv("CRYPTO_KEY"); ok {
 		defConfig.PrivateKeyPath = val
 	}
+
 	if val, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
 		defConfig.TrustedSubnet = val
 		log.Info().Str("TRUSTED_SUBNET", val).Send()
+	}
+
+	if val, ok := os.LookupEnv("GRPC_ADDR"); ok {
+		defConfig.GRPCAddr = val
+		log.Info().Str("GRPC_ADDR", val).Send()
 	}
 
 	return defConfig
@@ -408,7 +423,7 @@ func (cl *ConfigLoader) getServerEnvConfig() *serverConfigValues {
 }
 
 // mergeServerConfigs merges server configuration from defaults, file, flags, and environment variables with priority.
-func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEnv *serverConfigValues) *serverConfigValues {
+func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEnv *ServerConfig) *ServerConfig {
 	merged := *defaults
 
 	// Apply from file if not default
@@ -431,6 +446,10 @@ func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEn
 		if merged.PrivateKeyPath == emptyString {
 			merged.PrivateKeyPath = fromFile.PrivateKeyPath
 		}
+		if merged.GRPCAddr == emptyString {
+			merged.GRPCAddr = fromFile.GRPCAddr
+		}
+
 	}
 
 	// Apply from flags if not default
@@ -455,6 +474,9 @@ func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEn
 		merged.AuditConfig = fromFlags.AuditConfig
 		if fromFlags.PrivateKeyPath != emptyString {
 			merged.PrivateKeyPath = fromFlags.PrivateKeyPath
+		}
+		if fromFile.GRPCAddr != emptyString {
+			merged.GRPCAddr = fromFlags.GRPCAddr
 		}
 	}
 
@@ -486,6 +508,9 @@ func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEn
 		}
 		if fromEnv.PrivateKeyPath != emptyString {
 			merged.PrivateKeyPath = fromEnv.PrivateKeyPath
+		}
+		if fromEnv.GRPCAddr != emptyString {
+			merged.GRPCAddr = fromEnv.GRPCAddr
 		}
 	}
 
@@ -525,6 +550,7 @@ func (cl *ConfigLoader) LoadAgentConfig() AgentConfig {
 		HashConfig:     merged.HashConfig,
 		RateLimit:      merged.RateLimit,
 		PublicKeyPath:  merged.PublicKeyPath,
+		GRPCAddr:       merged.GRPCAddr,
 	}
 }
 
@@ -540,16 +566,8 @@ func (cl *ConfigLoader) getDefaultAgentConfig() *agentConfigValues {
 		ReportInterval: defaultReportInterval,
 		RateLimit:      defaultRateLimit,
 		PublicKeyPath:  emptyString,
+		GRPCAddr:       emptyString,
 	}
-}
-
-type agentConfigValues struct {
-	SocketConfig
-	HashConfig
-	PollInterval   uint
-	ReportInterval uint
-	RateLimit      uint
-	PublicKeyPath  string
 }
 
 // loadAgentConfigFromFile loads agent configuration from a JSON file specified by environment variable or flag.
@@ -610,6 +628,7 @@ func (cl *ConfigLoader) agentConfigJSONToValues(cfg *AgentConfigJSON) *agentConf
 		PollInterval:   pollInterval,
 		ReportInterval: reportInterval,
 		PublicKeyPath:  cfg.CryptoKey,
+		GRPCAddr:       cfg.GRPCAddr,
 	}
 }
 
@@ -633,6 +652,7 @@ func (cl *ConfigLoader) parseAgentFlags() *agentConfigValues {
 	flagSet.StringVar(&configFile, "config", emptyString, "Path to config file")
 	flagSet.Var(&socket, "a", "-a=<host>:<port>")
 	flagSet.Var(&hashKey, "k", "-k=<key_for_hash>")
+	grpcAddr := flagSet.String("grpc-addr", emptyString, "gRPC server address")
 
 	if err := flagSet.Parse(cl.args); err != nil {
 		log.Error().Err(err).Msg("Error parsing flags")
@@ -645,6 +665,7 @@ func (cl *ConfigLoader) parseAgentFlags() *agentConfigValues {
 		ReportInterval: *reportInterval,
 		RateLimit:      *rateLimit,
 		PublicKeyPath:  *publicKeyPath,
+		GRPCAddr:       *grpcAddr,
 	}
 }
 
@@ -684,6 +705,10 @@ func (cl *ConfigLoader) getAgentEnvConfig() *agentConfigValues {
 		defConfig.PublicKeyPath = val
 	}
 
+	if val, ok := os.LookupEnv("GRPC_ADDR"); ok {
+		defConfig.GRPCAddr = val
+	}
+
 	return defConfig
 }
 
@@ -705,6 +730,9 @@ func (cl *ConfigLoader) mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv
 		if merged.PublicKeyPath == emptyString {
 			merged.PublicKeyPath = fromFile.PublicKeyPath
 		}
+		if merged.GRPCAddr == emptyString {
+			merged.GRPCAddr = fromFile.GRPCAddr
+		}
 	}
 
 	// Apply from flags if not default
@@ -721,6 +749,9 @@ func (cl *ConfigLoader) mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv
 		}
 		if fromFlags.RateLimit != defaultRateLimit {
 			merged.RateLimit = fromFlags.RateLimit
+		}
+		if fromFile.GRPCAddr != emptyString {
+			merged.GRPCAddr = fromFlags.GRPCAddr
 		}
 
 		merged.PublicKeyPath = fromFlags.PublicKeyPath
@@ -743,6 +774,9 @@ func (cl *ConfigLoader) mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv
 		}
 		if fromEnv.RateLimit != defaultRateLimit {
 			merged.RateLimit = fromEnv.RateLimit
+		}
+		if fromEnv.GRPCAddr != emptyString {
+			merged.GRPCAddr = fromEnv.GRPCAddr
 		}
 		merged.PublicKeyPath = fromEnv.PublicKeyPath
 	}
