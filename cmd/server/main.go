@@ -20,6 +20,7 @@ import (
 	"github.com/rompil2/metrics_aggregator/internal/repository/dbstore"
 	"github.com/rompil2/metrics_aggregator/internal/repository/filestore"
 	"github.com/rompil2/metrics_aggregator/internal/repository/memstore"
+	"github.com/rompil2/metrics_aggregator/internal/server"
 	"github.com/rompil2/metrics_aggregator/internal/service"
 )
 
@@ -91,16 +92,24 @@ func main() {
 		privateKey,
 		cfg.TrustedSubnet,
 	)
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,
 	}
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	grpcServerDone := make(chan struct{})
 	go func() {
-		log.Printf("The server is starting at %s with config %#v \n", server.Addr, cfg)
-		if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		if err := server.StartGRPCServer(cfg.GRPCAddr, cfg.TrustedSubnet, *srvc); err != nil {
+			log.Fatal(err)
+		}
+		close(grpcServerDone)
+	}()
+
+	go func() {
+		log.Printf("The server is starting at %s with config %#v \n", httpServer.Addr, cfg)
+		if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()
@@ -112,11 +121,18 @@ func main() {
 	defer cancel()
 
 	// Attempt graceful shutdown
-	if err := server.Shutdown(ctx); err != nil {
+	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("Graceful shutdown failed: %v\n", err)
-		if err := server.Close(); err != nil {
+		if err := httpServer.Close(); err != nil {
 			log.Fatalf("Forced shutdown failed: %v\n", err)
 		}
+	}
+
+	select {
+	case <-grpcServerDone:
+		log.Println("GRPC server shutdown gracefully")
+	case <-time.After(5 * time.Second):
+		log.Println("GRPC server shutdown timed out")
 	}
 
 	log.Println("Server stopped")
