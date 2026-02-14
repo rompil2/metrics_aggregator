@@ -475,7 +475,7 @@ func (cl *ConfigLoader) mergeServerConfigs(defaults, fromFile, fromFlags, fromEn
 		if fromFlags.PrivateKeyPath != emptyString {
 			merged.PrivateKeyPath = fromFlags.PrivateKeyPath
 		}
-		if fromFile.GRPCAddr != emptyString {
+		if fromFlags.GRPCAddr != emptyString {
 			merged.GRPCAddr = fromFlags.GRPCAddr
 		}
 	}
@@ -750,7 +750,7 @@ func (cl *ConfigLoader) mergeAgentConfigs(defaults, fromFile, fromFlags, fromEnv
 		if fromFlags.RateLimit != defaultRateLimit {
 			merged.RateLimit = fromFlags.RateLimit
 		}
-		if fromFile.GRPCAddr != emptyString {
+		if fromFlags.GRPCAddr != emptyString {
 			merged.GRPCAddr = fromFlags.GRPCAddr
 		}
 
