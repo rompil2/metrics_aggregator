@@ -169,8 +169,8 @@ func TestDBStore_IsRetriableError(t *testing.T) {
 	store := DBStore{}
 
 	tests := []struct {
-		name     string
 		err      error
+		name     string
 		expected bool
 	}{
 		{

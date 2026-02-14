@@ -1,3 +1,5 @@
+// Package agent provides a client for sending metrics to a remote server via HTTP.
+// path: internal/agent/client.go
 package agent
 
 import (
@@ -5,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -19,34 +22,52 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 )
 
 const (
 	errChSize       = 1
 	updatePath      = "/update/"
-	batchUpdatePath = "/updates/" // Добавляем отдельный путь для batch обновлений
+	batchUpdatePath = "/updates/" // Add separate path for batch updates
 )
 
+// Metrics represents a map of metric names to their current values, used for internal aggregation.
 type Metrics = map[string]any
 
+// JobMetrics encapsulates compressed metric data and its optional HMAC-SHA256 hash for secure transmission.
 type JobMetrics struct {
 	compressedData *bytes.Buffer
 	Hash           *string
 }
 
+// HTTPClient sends collected metrics to a remote server via HTTP,
+// supporting both individual and batch updates with optional gzip compression and request signing.
 type HTTPClient struct {
-	mu             sync.RWMutex
 	lastMetrics    Metrics
-	reportInterval time.Duration
-	socket         string
 	client         *http.Client
-	batchEnabled   bool
 	hasher         *hash.Hash
+	socket         string
+	reportInterval time.Duration
 	rateLimit      uint
+	mu             sync.RWMutex
+	batchEnabled   bool
+	publicKey      *rsa.PublicKey
 }
 
-func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEnabled bool, hashKey string, rateLimit uint) *HTTPClient {
+// NewHTTPClient creates a new HTTPClient configured with the given reporting interval, server address,
+// batch mode, HMAC key for request signing, and rate limit (number of concurrent workers).
+// If hashKey is non-empty, all requests will include a HashSHA256 header for integrity verification.
+func NewHTTPClient(
+	reportInterval time.Duration,
+	host string,
+	port uint,
+	batchEnabled bool,
+	hashKey string,
+	rateLimit uint,
+	publicKey *rsa.PublicKey,
+
+) *HTTPClient {
 	if hashKey != "" {
 		key := []byte(hashKey)
 		hash := hmac.New(sha256.New, key)
@@ -54,25 +75,31 @@ func NewHTTPClient(reportInterval time.Duration, host string, port uint, batchEn
 			reportInterval: reportInterval,
 			socket:         fmt.Sprintf("http://%s:%v", host, port),
 			client: &http.Client{
-				Timeout: 30 * time.Second, // Добавляем таймаут
+				Timeout: 30 * time.Second, // Add timeout
 			},
 			batchEnabled: batchEnabled,
 			hasher:       &hash,
 			mu:           sync.RWMutex{},
 			rateLimit:    rateLimit,
+			publicKey:    publicKey,
 		}
 	}
 	return &HTTPClient{
 		reportInterval: reportInterval,
 		socket:         fmt.Sprintf("http://%s:%v", host, port),
 		client: &http.Client{
-			Timeout: 30 * time.Second, // Добавляем таймаут
+			Timeout: 30 * time.Second, // Add timeout
 		},
 		batchEnabled: batchEnabled,
 		hasher:       nil,
+		rateLimit:    rateLimit,
+		publicKey:    publicKey,
 	}
 }
 
+// Run starts the metrics reporting loop, sending the latest collected metrics to the server
+// at each reporting interval. It reads metrics from the channel and respects context cancellation.
+// Errors during transmission are logged but do not stop the loop.
 func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	ticker := time.NewTicker(h.reportInterval)
 	defer ticker.Stop()
@@ -82,7 +109,7 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 
 	var wg sync.WaitGroup
 
-	// Обработчик ошибок
+	// Error handler
 	go func() {
 		for err := range errCh {
 			if err != nil {
@@ -132,6 +159,9 @@ func (h *HTTPClient) Run(ctx context.Context, ch chan map[string]any) {
 	}
 }
 
+// SendMetrics sends metrics individually using multiple concurrent workers (rate-limited).
+// Each metric is serialized, optionally hashed, compressed with gzip, and sent to the /update/ endpoint.
+// This method is used when rateLimit >= 2.
 func (h *HTTPClient) SendMetrics(ctx context.Context, metrics Metrics) error {
 	var errs []error
 	var mu sync.Mutex
@@ -181,11 +211,18 @@ producerLoop:
 			h.appendError(&mu, &errs, err)
 			break
 		}
+		// encode data with public key if it is set
+		if h.publicKey != nil {
+			buf, err = h.encryptData(buf)
+			if err != nil {
+				return fmt.Errorf("encoding data: %w", err)
+			}
+		}
 		hashString := new(string)
 		if h.hasher != nil {
 			mu.Lock()
 			(*h.hasher).Reset()
-			if _, err := (*h.hasher).Write(buf); err != nil {
+			if _, err = (*h.hasher).Write(buf); err != nil {
 				h.appendError(&mu, &errs, fmt.Errorf("hashing data: %w", err))
 				mu.Unlock()
 				break
@@ -194,7 +231,7 @@ producerLoop:
 			mu.Unlock()
 		}
 
-		// Создаем сжатые данные
+		// create data compressor
 		compressedData, err := h.compressData(buf)
 		if err != nil {
 			h.appendError(&mu, &errs, fmt.Errorf("compressing data for %s: %w", key, err))
@@ -217,39 +254,51 @@ producerLoop:
 	return h.handleErrors(errs)
 }
 
+// SendMetricsBatch sends all metrics in a single JSON array request to the /updates/ endpoint.
+// It serializes the entire batch, optionally computes a single hash, compresses with gzip,
+// and sends it in one HTTP POST. This method is used when rateLimit < 2.
 func (h *HTTPClient) SendMetricsBatch(ctx context.Context, metrics Metrics) error {
-	// Создаем batch метрик
+	// Create batch metrics
 	metricsBatch, errs := h.createMetricsBatch(metrics)
 	if len(errs) > 0 {
 		return h.handleErrors(errs)
 	}
 
 	if len(metricsBatch) == 0 {
-		return nil // Нет валидных метрик для отправки
+		return nil // No valid metrics to send
 	}
 
-	// Маршалим в JSON
+	// Marshal to JSON
 	jsonData, err := json.Marshal(metricsBatch)
 	if err != nil {
 		return fmt.Errorf("marshaling metrics batch: %w", err)
 	}
+
+	// encode data with public key if it is set
+	if h.publicKey != nil {
+		jsonData, err = h.encryptData(jsonData)
+		if err != nil {
+			return fmt.Errorf("encoding data: %w", err)
+		}
+	}
+
 	hashString := new(string)
 	if h.hasher != nil {
 		(*h.hasher).Reset()
-		if _, err := (*h.hasher).Write(jsonData); err != nil {
+		if _, err = (*h.hasher).Write(jsonData); err != nil {
 			return fmt.Errorf("hashing data: %w", err)
 		}
 		*hashString = fmt.Sprintf("%x", (*h.hasher).Sum(nil))
 	}
 
-	// Сжимаем данные
+	// Compress data
 	compressedData, err := h.compressData(jsonData)
 	if err != nil {
 		return fmt.Errorf("compressing batch data: %w", err)
 	}
 
-	// Отправляем запрос
-	url := h.socket + batchUpdatePath // Используем отдельный endpoint для batch
+	// Send request
+	url := h.socket + batchUpdatePath // Use separate endpoint for batch
 	return h.sendRequest(ctx, url, compressedData, hashString)
 }
 
@@ -297,7 +346,9 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 		if err != nil {
 			return fmt.Errorf("creating request: %w", err)
 		}
-
+		if ips, err := net.LookupIP("localhost"); err == nil {
+			req.Header.Set("X-Forwarded-For", ips[0].String())
+		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
 		req.Header.Set("Accept-Encoding", "gzip")
@@ -327,7 +378,7 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 		if resp.StatusCode >= http.StatusBadRequest {
 			lastErr = fmt.Errorf("server returned status: %d %s", resp.StatusCode, resp.Status)
 
-			// Check if status code is retriable (5xx errors are usually retriable)
+			// Check if status code is retriable
 			if !h.isRetriableStatusCode(resp.StatusCode) || attempt == maxAttempts-1 {
 				return lastErr
 			}
@@ -347,7 +398,7 @@ func (h *HTTPClient) sendRequest(ctx context.Context, url string, body *bytes.Bu
 	return fmt.Errorf("all %d attempts failed, last error: %w", maxAttempts, lastErr)
 }
 
-// isRetriableError checks if an error is retriable
+// isRetriableError checks if an error is retriable.
 func (h *HTTPClient) isRetriableError(err error) bool {
 	// Network errors, timeouts, and temporary errors are retriable
 	var netErr net.Error
@@ -369,7 +420,7 @@ func (h *HTTPClient) isRetriableError(err error) bool {
 	return false
 }
 
-// isRetriableStatusCode checks if an HTTP status code is retriable
+// isRetriableStatusCode checks if an HTTP status code is retriable.
 func (h *HTTPClient) isRetriableStatusCode(statusCode int) bool {
 	// 5xx errors are server errors and usually retriable
 	// 429 (Too Many Requests) and 408 (Request Timeout) are also retriable
@@ -396,14 +447,20 @@ func (h *HTTPClient) handleErrors(errs []error) error {
 	return fmt.Errorf("%d errors occurred, first one: %w", len(errs), errors.Join(errs...))
 }
 
-// Остальной код без изменений...
+// MetricProcessor defines an interface for converting raw metric values into structured model.Metrics
+// and serializing them to JSON bytes.
 type MetricProcessor interface {
 	CreateMetric(key string, value any) (model.Metrics, error)
 	MarshalMetric(metric model.Metrics) ([]byte, error)
 }
 
+// HTTPMetricProcessor implements MetricProcessor for HTTP-based metric transmission,
+// converting Go types (int64, float64) to counter or gauge metrics and marshaling to JSON.
 type HTTPMetricProcessor struct{}
 
+// CreateMetric converts a key-value pair into a typed model.Metrics instance,
+// mapping int64 to Counter (Delta) and float64 to Gauge (Value).
+// Returns an error for unsupported value types.
 func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics, error) {
 	var m model.Metrics
 	m.ID = key
@@ -422,6 +479,11 @@ func (p *HTTPMetricProcessor) CreateMetric(key string, value any) (model.Metrics
 	return m, nil
 }
 
+// MarshalMetric serializes a model.Metrics instance to JSON bytes.
 func (p *HTTPMetricProcessor) MarshalMetric(metric model.Metrics) ([]byte, error) {
 	return json.Marshal(metric)
+}
+
+func (h *HTTPClient) encryptData(data []byte) ([]byte, error) {
+	return crypto.EncryptWithPublicKey(h.publicKey, data)
 }

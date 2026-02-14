@@ -1,6 +1,9 @@
+// Package handler contains the HTTP request handlers for the metrics aggregator service.
+// path: internal/handler/handler.go
 package handler
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,12 +14,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/rompil2/metrics_aggregator/internal/audit"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/logger"
 	"github.com/rompil2/metrics_aggregator/internal/model"
 	"github.com/rompil2/metrics_aggregator/internal/service"
 	"github.com/rs/zerolog"
 )
 
+// Service defines the interface for a metrics service that supports CRUD operations,
+// batch updates, and health checks.
 type Service interface {
 	UpdateMetrics(metric *model.Metrics) error
 	GetMetrics(ID string) (model.Metrics, error)
@@ -25,32 +32,45 @@ type Service interface {
 	Ping() error
 }
 
+// HandlerMux encapsulates an HTTP router with metrics handling endpoints,
+// middleware chain, and dependencies such as the service layer and HTML templates.
 type HandlerMux struct {
 	chi.Router
-	Service Service
-	tmpl    *template.Template
+	Service       Service
+	CryptoService *crypto.CryptoService
+	tmpl          *template.Template
 }
 
-func NewHandlerMux(service Service, tmpl *template.Template, key string) *HandlerMux {
+// NewHandlerMux creates a new HTTP handler with a complete middleware stack and route registration.
+// It configures request ID, real IP extraction, request decompression, response compression,
+// optional request/response hashing, structured logging, recovery, and audit logging.
+// The provided service is used for business logic, and the template is used for the root HTML page.
+func NewHandlerMux(service Service, tmpl *template.Template, key, auditFilePath, auditURL string, privateKey *rsa.PrivateKey, trustedSubnet string) *HandlerMux {
 
+	cryptoService := crypto.NewCryptoService(privateKey)
 	h := &HandlerMux{
-		Service: service,
-		tmpl:    tmpl,
+		Service:       service,
+		CryptoService: cryptoService,
+		tmpl:          tmpl,
 	}
 	h.Router = chi.NewRouter()
 	h.Use(middleware.RequestID)
-	h.Use(middleware.RealIP)
+	// h.Use(middleware.RealIP)
+	h.Use(MiddlewareCheckIP(trustedSubnet))
 	// h.Use(middleware.Compress(1, "text/html", "application/json"))
 	h.Use(MiddlewareRequestUnzip)
-	h.Use(MiddlewareResponseZip)
-	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
 
 	h.Use(NaiveLoggerMiddleware)
-	h.Use(middleware.Recoverer)
+	// h.Use(MiddlewareCryptoDecrypt(privateKey))
+	h.Use(MiddlewareResponseZip)
+	// h.Use(middleware.Logger) // It is a logger from the chi package. It is based on log\slog
 	if key != "" {
-		h.Use(MiddlewareCheckHash(key))
 		h.Use(MiddlewareSetHash(key))
 	}
+	h.Use(middleware.Recoverer)
+
+	manager := audit.InitializeAuditManager(auditFilePath, auditURL)
+	h.Use(audit.AuditMiddleware(manager))
 
 	h.Get("/", h.HomePage)
 	h.Get("/ping", h.Ping)
@@ -60,9 +80,11 @@ func NewHandlerMux(service Service, tmpl *template.Template, key string) *Handle
 	h.Post("/value/", h.GetMetricsJSON)
 	h.Get("/value/{mtype}/{id}", h.GetMetrics)
 
+	h.Mount("/debug", middleware.Profiler())
 	return h
 }
 
+// HomePage renders an HTML page displaying all available metrics using the configured template.
 func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
 	metrics, err := h.Service.GetAllMetrics()
 	if err != nil {
@@ -73,6 +95,8 @@ func (h *HandlerMux) HomePage(w http.ResponseWriter, r *http.Request) {
 	h.tmpl.Execute(w, metrics)
 }
 
+// GetMetrics retrieves a single metric by type and ID from the URL path and returns its raw value as plain text.
+// Supported types are "counter" and "gauge". Returns 404 if not found, 400 for invalid type.
 func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
 
 	mtype := chi.URLParam(r, "mtype")
@@ -98,6 +122,8 @@ func (h *HandlerMux) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// UpdateMetrics updates or creates a metric using values extracted from the URL path (type, ID, value).
+// It supports both counter (integer) and gauge (float) types. Returns 200 on success.
 func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 
 	ID := chi.URLParam(r, "id")
@@ -112,6 +138,9 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := audit.WithAuditMetrics(r.Context(), []string{ID})
+	*r = *r.Clone(ctx) // Обновляем запрос с новым контекстом
+
 	if err := h.Service.UpdateMetrics(&metricsModel); err != nil {
 		// If error is "Unknown metrics ID, created the new one" - then it's a new metrics
 		if strings.Contains(err.Error(), "created the new one") {
@@ -123,9 +152,21 @@ func (h *HandlerMux) UpdateMetrics(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// UpdateWithJSON updates a single metric from a JSON request body.
+// It validates the input, performs the update via the service, and returns appropriate HTTP status codes.
+// Audit context is enriched with the metric ID.
 func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 	log := logger.FromContext(r.Context())
 	log.Debug().Msg("Process updating a metrics")
+
+	if h.CryptoService != nil {
+		decryptedBody, err := h.CryptoService.DecryptRequestBody(r.Body)
+		if err != nil {
+			http.Error(w, "Decryption failed", http.StatusBadRequest)
+			return
+		}
+		r.Body = decryptedBody
+	}
 
 	var metricsModel model.Metrics
 	decoder := json.NewDecoder(r.Body)
@@ -143,6 +184,9 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := audit.WithAuditMetrics(r.Context(), []string{metricsModel.ID})
+	*r = *r.Clone(ctx) // Обновляем запрос с новым контекстом
+
 	err := h.Service.UpdateMetrics(&metricsModel)
 	if err != nil {
 		h.handleUpdateError(w, err, metricsModel.ID, log)
@@ -153,9 +197,20 @@ func (h *HandlerMux) UpdateWithJSON(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// UpdatesWithJSON updates multiple metrics from a JSON array in the request body.
+// It validates all metrics, enriches the audit context with all IDs, and delegates to the service's batch update method.
 func (h *HandlerMux) UpdatesWithJSON(w http.ResponseWriter, r *http.Request) {
 	log := logger.FromContext(r.Context())
 	log.Debug().Msg("Process updating a metrics")
+
+	if h.CryptoService != nil {
+		decryptedBody, err := h.CryptoService.DecryptRequestBody(r.Body)
+		if err != nil {
+			http.Error(w, "Decryption failed", http.StatusBadRequest)
+			return
+		}
+		r.Body = decryptedBody
+	}
 
 	var metricsModels []model.Metrics
 	decoder := json.NewDecoder(r.Body)
@@ -167,13 +222,19 @@ func (h *HandlerMux) UpdatesWithJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Validate MetricModel
+	var ids []string
 	for _, metricsModel := range metricsModels {
 		if err := validateMetricsUpdate(&metricsModel); err != nil {
 			log.Error().Err(err).Msg("validation failed")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		ids = append(ids, metricsModel.ID)
 	}
+
+	ctx := audit.WithAuditMetrics(r.Context(), ids)
+	*r = *r.Clone(ctx) // Обновляем запрос с новым контекстом
+
 	err := h.Service.UpdateAllMetrics(metricsModels)
 	if err != nil {
 		h.handleUpdateError(w, err, "All metrics", log)
@@ -196,6 +257,8 @@ func (h *HandlerMux) handleUpdateError(w http.ResponseWriter, err error, id stri
 	http.Error(w, "Internal server error", http.StatusInternalServerError)
 }
 
+// GetMetricsJSON retrieves a metric specified in the JSON request body and returns it as JSON.
+// Requires Content-Type: application/json and validates the input metric structure.
 func (h *HandlerMux) GetMetricsJSON(w http.ResponseWriter, r *http.Request) {
 	log := logger.FromContext(r.Context())
 	log.Info().Msg("Process requesting a metrics")
@@ -240,6 +303,8 @@ func (h *HandlerMux) GetMetricsJSON(w http.ResponseWriter, r *http.Request) {
 	log.Info().Msg("the metrics is returned back")
 }
 
+// Ping checks the availability of the underlying metrics service.
+// Returns 200 if the service is reachable, 500 otherwise.
 func (h *HandlerMux) Ping(w http.ResponseWriter, r *http.Request) {
 	if err := h.Service.Ping(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -247,6 +312,9 @@ func (h *HandlerMux) Ping(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// BuildMetrics constructs a Metrics model from string inputs for type, ID, and value.
+// It parses the value according to the metric type (int64 for counter, float64 for gauge)
+// and returns an error for unknown types or invalid formats.
 func BuildMetrics(mType string, id string, val string) (model.Metrics, error) {
 
 	switch mType {
@@ -277,6 +345,8 @@ func BuildMetrics(mType string, id string, val string) (model.Metrics, error) {
 
 }
 
+// validateMetricsGet ensures that a metric used for retrieval has a non-empty ID
+// and a valid type (either "counter" or "gauge").
 func validateMetricsGet(metrics *model.Metrics) error {
 	if metrics.ID == "" {
 		return errors.New("ID must be set")
@@ -288,6 +358,8 @@ func validateMetricsGet(metrics *model.Metrics) error {
 
 }
 
+// validateMetricsUpdate performs validation for metric updates,
+// ensuring that counters have a Delta and gauges have a Value set in addition to basic get validation.
 func validateMetricsUpdate(metrics *model.Metrics) error {
 	if err := validateMetricsGet(metrics); err != nil {
 		return err

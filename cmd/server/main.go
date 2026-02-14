@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -14,14 +15,35 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/rompil2/metrics_aggregator/internal/config"
+	"github.com/rompil2/metrics_aggregator/internal/crypto"
 	"github.com/rompil2/metrics_aggregator/internal/handler"
 	"github.com/rompil2/metrics_aggregator/internal/repository/dbstore"
 	"github.com/rompil2/metrics_aggregator/internal/repository/filestore"
 	"github.com/rompil2/metrics_aggregator/internal/repository/memstore"
+	"github.com/rompil2/metrics_aggregator/internal/server"
 	"github.com/rompil2/metrics_aggregator/internal/service"
 )
 
+const (
+	PathToTemplate = "templates/index.html"
+)
+
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+}
+
 func main() {
+
+	printBuildInfo()
+
 	var (
 		repo service.Repo
 	)
@@ -55,20 +77,39 @@ func main() {
 		repo = dbRepo
 	}
 
+	privateKey, err := crypto.LoadPrivateKey(cfg.PrivateKeyPath)
+	if err != nil {
+		log.Fatalf("Error loading private key: %v", err)
+	}
+
 	srvc := service.NewMetricService(repo)
-
-	handler := handler.NewHandlerMux(srvc, template.Must(template.ParseFiles("templates/index.html")), cfg.HashConfig.String())
-
-	server := &http.Server{
+	handler := handler.NewHandlerMux(
+		srvc,
+		template.Must(template.ParseFiles(PathToTemplate)),
+		cfg.HashConfig.String(),
+		cfg.AuditFile.String(),
+		cfg.AuditURL.String(),
+		privateKey,
+		cfg.TrustedSubnet,
+	)
+	httpServer := &http.Server{
 		Addr:    cfg.SocketConfig.String(),
 		Handler: handler,
 	}
 
 	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(done, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	grpcServerDone := make(chan struct{})
 	go func() {
-		log.Printf("The server is starting at %s with config %#v \n", server.Addr, cfg)
-		if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		if err := server.StartGRPCServer(cfg.GRPCAddr, cfg.TrustedSubnet, srvc); err != nil {
+			log.Fatal(err)
+		}
+		close(grpcServerDone)
+	}()
+
+	go func() {
+		log.Printf("The server is starting at %s with config %#v \n", httpServer.Addr, cfg)
+		if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()
@@ -80,13 +121,19 @@ func main() {
 	defer cancel()
 
 	// Attempt graceful shutdown
-	if err := server.Shutdown(ctx); err != nil {
+	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("Graceful shutdown failed: %v\n", err)
-		if err := server.Close(); err != nil {
+		if err := httpServer.Close(); err != nil {
 			log.Fatalf("Forced shutdown failed: %v\n", err)
 		}
 	}
 
-	log.Println("Server stopped")
+	select {
+	case <-grpcServerDone:
+		log.Println("GRPC server shutdown gracefully")
+	case <-time.After(5 * time.Second):
+		log.Println("GRPC server shutdown timed out")
+	}
 
+	log.Println("Server stopped")
 }
