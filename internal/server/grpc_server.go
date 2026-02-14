@@ -1,3 +1,6 @@
+// Package server also implements the gRPC Metrics service.
+// It handles incoming metric updates and stores them using the underlying service.
+// Path: internal/server/grpc_server.go
 package server
 
 import (
@@ -12,22 +15,29 @@ import (
 
 	"github.com/rompil2/metrics_aggregator/api"
 	"github.com/rompil2/metrics_aggregator/internal/model"
-	"github.com/rompil2/metrics_aggregator/internal/service"
 )
 
+type MetricService interface {
+	UpdateAllMetrics(metrics []model.Metrics) error
+}
+
+// GRPCServer implements the gRPC Metrics service for handling metric updates.
 type GRPCServer struct {
 	api.UnimplementedMetricsServer
-	service       service.MetricService
+	service       MetricService
 	trustedSubnet string
 }
 
-func NewGRPCServer(service service.MetricService, trustedSubnet string) *GRPCServer {
+// NewGRPCServer creates a new instance of GRPCServer with the provided service and trusted subnet.
+func NewGRPCServer(service MetricService, trustedSubnet string) *GRPCServer {
 	return &GRPCServer{
 		service:       service,
 		trustedSubnet: trustedSubnet,
 	}
 }
 
+// UpdateMetrics receives a batch of metrics via gRPC and stores them using the underlying service.
+// It verifies the client's IP address against the trusted subnet if configured.
 func (s *GRPCServer) UpdateMetrics(ctx context.Context, req *api.UpdateMetricsRequest) (*api.UpdateMetricsResponse, error) {
 	// Проверка IP-адреса через метаданные
 	if err := s.checkIP(ctx); err != nil {
@@ -42,9 +52,10 @@ func (s *GRPCServer) UpdateMetrics(ctx context.Context, req *api.UpdateMetricsRe
 			MType: mTypeToString(m.Type),
 		}
 
-		if m.Type == api.Metric_COUNTER {
+		switch m.Type {
+		case api.Metric_COUNTER:
 			modelMetric.Delta = &m.Delta
-		} else if m.Type == api.Metric_GAUGE {
+		case api.Metric_GAUGE:
 			modelMetric.Value = &m.Value
 		}
 
@@ -99,7 +110,9 @@ func mTypeToString(mType api.Metric_MType) string {
 	return model.Gauge
 }
 
-func StartGRPCServer(addr, trustedSubnet string, svc service.MetricService) error {
+// StartGRPCServer initializes and starts a gRPC server listening on the specified address.
+// It applies an IP check interceptor if a trusted subnet is provided.
+func StartGRPCServer(addr, trustedSubnet string, svc MetricService) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -111,6 +124,9 @@ func StartGRPCServer(addr, trustedSubnet string, svc service.MetricService) erro
 	return grpcServer.Serve(lis)
 }
 
+// IPCheckUnaryInterceptor returns a gRPC unary interceptor that checks if the client's IP address
+// is within the trusted subnet specified. If the subnet is empty, the check is skipped.
+// The IP address must be provided in the 'x-real-ip' metadata key.
 func IPCheckUnaryInterceptor(trustedSubnet string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if trustedSubnet == "" {

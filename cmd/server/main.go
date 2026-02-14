@@ -101,7 +101,7 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	grpcServerDone := make(chan struct{})
 	go func() {
-		if err := server.StartGRPCServer(cfg.GRPCAddr, cfg.TrustedSubnet, *srvc); err != nil {
+		if err := server.StartGRPCServer(cfg.GRPCAddr, cfg.TrustedSubnet, srvc); err != nil {
 			log.Fatal(err)
 		}
 		close(grpcServerDone)
