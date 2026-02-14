@@ -32,7 +32,7 @@ type GRPCClient struct {
 // NewGRPCClient creates a new gRPC client connected to the specified address.
 // It uses the generated api.MetricsClient as the concrete implementation.
 func NewGRPCClient(addr string) (*GRPCClient, error) {
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
